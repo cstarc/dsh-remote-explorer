@@ -23,7 +23,7 @@ import { runClean } from './commands/clean.js';
 import { runOfflineTransfer } from './commands/offline.js';
 import { RemoteError, toErrorMessage } from '../util/errors.js';
 import { normalizeRemoteCwd, validateRemoteCwd } from '../util/remote-cwd.js';
-import { resolveBaseDirName } from '../provision/remote-paths.js';
+import { resolveInstallRoot } from '../provision/remote-paths.js';
 import { bold, cyan, dim, printErr, println, red, yellow } from './output.js';
 
 /** 支持的子命令 */
@@ -72,7 +72,7 @@ function printHelp(): void {
   println(bold('connect 参数'));
   println('  --offline                 严格离线引导（也适用于 provision）；环境变量 DSH_REMOTE_OFFLINE=1 对插件同样生效');
   println('  --cwd <远端路径>          远端工作目录，参与会话标识计算，也是远端 dsh 进程的工作目录');
-  println('  --base-dir <相对路径>     安装根（相对远端家目录，默认 .dsh-remote-explorer/btsd321）');
+  println('  --base-dir <路径>         安装根：绝对路径（//data/rt）或相对家目录（data/rt），默认 .dsh-remote-explorer/btsd321');
   println('  --local-port <端口>       本机监听端口（默认由系统分配）');
   println('  --no-open                 不自动打开浏览器');
   println('  --force-restart           即便远端已有可用会话也重新启动');
@@ -95,7 +95,7 @@ function printHelp(): void {
   println(bold('doctor / provision 参数'));
   println('  --refresh-mirrors         强制重测镜像延迟，忽略缓存');
   println('  --cwd <远端路径>          （provision）远端工作目录');
-  println('  --base-dir <相对路径>     安装根（相对远端家目录，默认 .dsh-remote-explorer/btsd321）');
+  println('  --base-dir <路径>         安装根：绝对路径（//data/rt）或相对家目录（data/rt），默认 .dsh-remote-explorer/btsd321');
   println(`  --node-version <版本>     （provision）Node 版本（默认 ${versions.node}）`);
   println(`  --dsh-version <版本>      （provision）dsh 版本或 dist-tag（默认${versions.dsh}）`);
   println();
@@ -200,17 +200,17 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 
   // 安装根：显式校验并归一，非法形态在连主机之前就拒绝（远端 shell 只接受安全字符集）
-  let baseDirName: string | undefined;
+  let installRoot: string | undefined;
   if (values['base-dir'] !== undefined) {
     try {
-      baseDirName = resolveBaseDirName(values['base-dir']);
+      installRoot = resolveInstallRoot(values['base-dir']);
     } catch (error) {
       printErr(red(toErrorMessage(error)));
       return 64;
     }
   }
   /** 可选安装根参数（省略时走默认根） */
-  const baseDirOption = baseDirName === undefined ? {} : { baseDirName };
+  const baseDirOption = installRoot === undefined ? {} : { installRoot };
 
   // 认证旗标：空值直接拒绝（空路径/空密码没有合法用例）
   const privateKey = values['private-key'];

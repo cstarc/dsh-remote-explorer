@@ -28,12 +28,12 @@ export const Config = z.object({
   /** 默认远端工作目录（POSIX 绝对路径）；空串 = 远端家目录 */
   cwd: z.string().default('').description('默认远端工作目录（POSIX 绝对路径，空 = 家目录）'),
   /**
-   * 安装根（相对远端家目录的多段路径）；空串 = `.dsh-remote-explorer/btsd321`。
+   * 安装根：绝对路径（`/data/rt`）或相对远端家目录（`data/rt`）；空串 = `.dsh-remote-explorer/btsd321`。
    *
    * 改根会换一套独立运行时与 DSH_HOME：Node/dsh 需重新引导，旧根下的会话、
    * 插件仓库与凭据材料都不随之迁移。
    */
-  baseDir: z.string().default('').description('远端安装根（相对家目录；空 = .dsh-remote-explorer/btsd321）'),
+  baseDir: z.string().default('').description('远端安装根（绝对路径或相对家目录；空 = .dsh-remote-explorer/btsd321）'),
   /** 宿主进程 dispose 时是否保留远端 dsh 进程；默认 false = 连远端一起停 */
   keepRemoteOnDispose: z.boolean().default(false)
     .description('宿主退出时保留远端 dsh 进程（默认一起停止）'),

@@ -35,7 +35,7 @@ export interface OpenSessionOptions {
    * 与 `remoteCwd` 是两件事：安装根决定 Node/dsh/插件仓库/会话材料落在哪，
    * 工作目录决定远端 dsh 进程的 cwd 与远端窗口的默认目录。
    */
-  baseDirName?: string;
+  installRoot?: string;
   /** 传输类型；默认 'ssh'（向后兼容） */
   transportType?: TransportType;
   /** WSL 发行版名称（transportType='wsl' 时必需） */

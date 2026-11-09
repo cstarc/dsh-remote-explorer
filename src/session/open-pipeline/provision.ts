@@ -107,7 +107,7 @@ export async function provisionAndConfigure(
 
   const provisioned = await provision(transport, {
     sessionId,
-    ...(options.baseDirName !== undefined ? { baseDirName: options.baseDirName } : {}),
+    ...(options.installRoot !== undefined ? { installRoot: options.installRoot } : {}),
     patches,
     ...(options.offline ? { offline: true } : {}),
     ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}),

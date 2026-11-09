@@ -65,10 +65,10 @@ export async function probeAndReadCredentials(
   const isWsl = options.transportType === 'wsl';
   // 家目录要先拿到：既有会话探测与凭据材料读取都需要路径
   const probe = await probeRemote(
-    transport, undefined, isOfflineMode(options.offline), options.baseDirName,
+    transport, undefined, isOfflineMode(options.offline), options.installRoot,
   );
   log.info(`远端探测完成: homeDir=${probe.homeDir}`);
-  const paths = createRemotePaths(probe.homeDir, options.baseDirName);
+  const paths = createRemotePaths(probe.homeDir, options.installRoot);
   const ctx: RemoteContext = { transport, paths };
 
   // 1. 凭据材料：读回已有的，没有则生成新的

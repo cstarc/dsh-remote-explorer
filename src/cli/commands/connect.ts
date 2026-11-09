@@ -37,7 +37,7 @@ export interface ConnectCommandOptions {
    * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
    * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
    */
-  baseDirName?: string;
+  installRoot?: string;
 
   /** 本机端口；0 表示 OS 分配 */
   localPort: number;
@@ -96,7 +96,7 @@ export async function runConnect(options: ConnectCommandOptions): Promise<number
 
   try {
     session = await openSession({
-      ...(options.baseDirName !== undefined ? { baseDirName: options.baseDirName } : {}),
+      ...(options.installRoot !== undefined ? { installRoot: options.installRoot } : {}),
       hostAlias: options.alias,
       remoteCwd: options.cwd,
       ...(options.offline ? { offline: true } : {}),

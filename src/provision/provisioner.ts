@@ -43,7 +43,7 @@ export interface ProvisionOptions {
    * 换一套独立的运行时与 DSH_HOME：Node/dsh 需要重新安装，旧根的会话、插件仓库
    * 与凭据材料都不随之迁移——同一个 (主机, 目录) 在新根下是一个全新会话。
    */
-  baseDirName?: string;
+  installRoot?: string;
   /** 目标 Node 版本；省略时在线解析 Node 24 最新稳定版、离线用兜底地板 */
   nodeVersion?: string;
   /**
@@ -123,9 +123,9 @@ export async function provision(
   // 1. 探测远端环境
   options.onStageStart?.('探测远端环境');
   const offline = isOfflineMode(options.offline);
-  const probe = await probeRemote(transport, signal, offline, options.baseDirName);
+  const probe = await probeRemote(transport, signal, offline, options.installRoot);
   assertDiskSpace(probe, transport.hostAlias);
-  const paths = createRemotePaths(probe.homeDir, options.baseDirName);
+  const paths = createRemotePaths(probe.homeDir, options.installRoot);
   const ctx: RemoteContext = { transport, paths };
   options.onStageDone?.(`${probe.platform.os}/${probe.platform.arch}`);
 

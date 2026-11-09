@@ -18,7 +18,7 @@
  */
 
 import { isOfflineMode } from '../provision/offline-runtime.js';
-import { BASE_DIR_NAME, resolveBaseDirName } from '../provision/remote-paths.js';
+import { BASE_DIR_NAME, resolveInstallRoot } from '../provision/remote-paths.js';
 import { openSession, type RemoteSession, type TransportType } from '../session/session-manager.js';
 import { HANDOFF_PROTOCOL_VERSION, type ManageHandlers } from '../handoff/protocol.js';
 import { listSessions } from '../session/session-registry.js';
@@ -286,9 +286,9 @@ export class SessionSupervisor {
     }
     const remoteCwd = normalizeRemoteCwd(rawCwd);
     // 安装根同样在受理阶段校验：非法形态（绝对路径/~ /反斜杠/可疑字符）在连主机之前拒绝
-    let baseDirName: string;
+    let installRoot: string;
     try {
-      baseDirName = resolveBaseDirName(request.baseDir ?? this.defaults.baseDir);
+      installRoot = resolveInstallRoot(request.baseDir ?? this.defaults.baseDir);
     } catch (error) {
       throw new SupervisorError('bad_usage', toErrorMessage(error));
     }
@@ -310,7 +310,7 @@ export class SessionSupervisor {
       sessionId,
       hostAlias: request.hostAlias,
       remoteCwd,
-      baseDir: baseDirName === BASE_DIR_NAME ? undefined : baseDirName,
+      baseDir: installRoot === BASE_DIR_NAME ? undefined : installRoot,
       transportType,
       state: INITIAL_STATE,
       connecting: true,
@@ -558,7 +558,7 @@ export class SessionSupervisor {
         ...(this.offline ? { offline: true } : {}),
         hostAlias: request.hostAlias,
         remoteCwd: record.remoteCwd,
-        ...(record.baseDir !== undefined ? { baseDirName: record.baseDir } : {}),
+        ...(record.baseDir !== undefined ? { installRoot: record.baseDir } : {}),
         // 传输类型与 WSL 参数透传；缺省 'ssh' 保持向后兼容
         transportType: record.transportType,
         ...(request.distroName ? { distroName: request.distroName } : {}),

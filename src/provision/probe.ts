@@ -17,7 +17,7 @@
 import { RemoteError } from '../util/errors.js';
 import { formatBytes } from '../util/format.js';
 import { quote } from '../util/shell-quote.js';
-import { BASE_DIR_NAME } from './remote-paths.js';
+import { BASE_DIR_NAME, resolveBasePath } from './remote-paths.js';
 import type { RemotePlatform, RemoteTransport } from '../transport/types.js';
 
 /** 远端基础命令的可用情况 */
@@ -100,7 +100,7 @@ const REQUIRED_BYTES = 1_500_000_000;
  * @param transport - 已连接的传输
  * @param signal - 取消信号
  * @param offline - 严格离线模式（不查在线版本、不下载）
- * @param baseDirName - 安装根（相对家目录的多段路径）；缺省用 {@link BASE_DIR_NAME}
+ * @param installRoot - 安装根：绝对路径或相对家目录的路径；缺省用 {@link BASE_DIR_NAME}
  * @returns 探测结果
  * @throws RemoteError('REMOTE_TOOL_MISSING') 缺少下载或解包所需的基础命令
  */
@@ -108,13 +108,17 @@ export async function probeRemote(
   transport: RemoteTransport,
   signal?: AbortSignal,
   offline = false,
-  baseDirName: string = BASE_DIR_NAME,
+  installRoot: string = BASE_DIR_NAME,
 ): Promise<ProbeResult> {
   const platform = transport.platform;
 
   // 根目录名单独转义后拼在 "$HOME" 之后——不能把 $HOME 一起塞进 quote()，
   // 单引号会阻止 shell 展开，glob 就永远匹配不到已装的运行时
-  const base = `"$HOME"/${quote(baseDirName)}`;
+  // 绝对安装根（/data/rt）直接引用；相对根拼在 "$HOME" 之后
+  // （不能把 $HOME 塞进 quote()：单引号会阻止 shell 展开）
+  const base = installRoot.startsWith('/')
+    ? quote(installRoot)
+    : `"$HOME"/${quote(installRoot)}`;
 
   // 一次 exec 拿齐所有信息，减少往返
   const script = [
@@ -125,6 +129,9 @@ export async function probeRemote(
     // 先标记入口存在，再跑 `dsh --version` 取版本（先加任一已装 Node 到 PATH）
     `nd=$(ls -d ${base}/node/*/bin/node 2>/dev/null | head -n1); [ -n "$nd" ] && PATH="$(dirname "$nd"):$PATH"`,
     `if [ -x ${base}/node_modules/.bin/dsh ]; then printf "DSHBIN=%s\\n" "${base}/node_modules/.bin/dsh"; dsh_ver=$(${base}/node_modules/.bin/dsh --version 2>/dev/null | head -n1); [ -n "$dsh_ver" ] && printf "DSH=%s\\n" "$dsh_ver"; fi`,
+    // 磁盘余量优先量安装根所在文件系统（绝对根可能落在数据盘）；
+    // 根尚不存在时 df 会失败，此时退回量家目录
+    `df -Pk ${base} 2>/dev/null | awk 'NR==2 {printf "AVAIL=%s\\n", $4}'`,
     `df -Pk "$HOME" 2>/dev/null | awk 'NR==2 {printf "AVAIL=%s\\n", $4}'`,
   ].join('; ');
 
@@ -160,7 +167,7 @@ export async function probeRemote(
   const { nodes: managedNodes, dsh: managedDsh, dshPresentButUnusable } = parseInstalledRuntimes(
     result.stdout,
     homeDir,
-    baseDirName,
+    installRoot,
   );
 
   const availRaw = parseFirst(result.stdout, 'AVAIL=');
@@ -276,13 +283,13 @@ export function assertNodeStable(
  *
  * @param output - 探测脚本的 stdout
  * @param homeDir - 远端家目录绝对路径（推断 dsh 入口路径用）
- * @param baseDirName - 安装根（相对家目录的多段路径）；缺省用 {@link BASE_DIR_NAME}
+ * @param installRoot - 安装根：绝对路径或相对家目录的路径；缺省用 {@link BASE_DIR_NAME}
  * @returns 已装 Node 列表、可用 dsh 列表、以及「dsh 存在但不可用」标记
  */
 export function parseInstalledRuntimes(
   output: string,
   homeDir: string,
-  baseDirName: string = BASE_DIR_NAME,
+  installRoot: string = BASE_DIR_NAME,
 ): { nodes: InstalledRuntime[]; dsh: InstalledRuntime[]; dshPresentButUnusable: boolean } {
   const nodes: InstalledRuntime[] = [];
   for (const line of collect(output, 'NODE=')) {
@@ -294,7 +301,7 @@ export function parseInstalledRuntimes(
   const dshVersion = parseFirst(output, 'DSH=');
   if (dshVersion !== undefined && dshVersion !== '') {
     dsh.push({
-      path: `${homeDir}/${baseDirName}/node_modules/.bin/dsh`,
+      path: `${resolveBasePath(homeDir, installRoot)}/node_modules/.bin/dsh`,
       version: dshVersion,
     });
   }

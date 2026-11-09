@@ -43,7 +43,7 @@ export interface KillCommandOptions {
    * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
    * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
    */
-  baseDirName?: string;
+  installRoot?: string;
 }
 
 /**
@@ -69,8 +69,8 @@ export async function runKill(options: KillCommandOptions): Promise<number> {
     progress.done();
 
     progress.start('探测远端环境');
-    const probe = await probeRemote(transport, undefined, false, options.baseDirName);
-    const paths = createRemotePaths(probe.homeDir, options.baseDirName);
+    const probe = await probeRemote(transport, undefined, false, options.installRoot);
+    const paths = createRemotePaths(probe.homeDir, options.installRoot);
     progress.done();
 
     // 确定要停哪些会话：--all 时扫远端会话目录，否则只停指定的那一个。

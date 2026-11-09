@@ -22,7 +22,7 @@
 
 import { SshTransport } from '../../transport/ssh-transport.js';
 import { probeRemote } from '../../provision/probe.js';
-import { createRemotePaths, BASE_DIR_NAME, type RemotePaths } from '../../provision/remote-paths.js';
+import { createRemotePaths, type RemotePaths } from '../../provision/remote-paths.js';
 import { ownerFingerprint } from '../../util/owner-fingerprint.js';
 import { formatBytes } from '../../util/format.js';
 import { quote } from '../../util/shell-quote.js';
@@ -51,7 +51,7 @@ export interface CleanCommandOptions {
    * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
    * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
    */
-  baseDirName?: string;
+  installRoot?: string;
 }
 
 /** 清理结果 */
@@ -93,8 +93,8 @@ export async function runClean(options: CleanCommandOptions): Promise<number> {
     progress.done();
 
     progress.start('探测远端环境');
-    const probe = await probeRemote(transport, undefined, false, options.baseDirName);
-    const paths = createRemotePaths(probe.homeDir, options.baseDirName);
+    const probe = await probeRemote(transport, undefined, false, options.installRoot);
+    const paths = createRemotePaths(probe.homeDir, options.installRoot);
     progress.done();
 
     progress.start('收集保护清单与陈旧资源');
@@ -149,7 +149,8 @@ async function collectAndClean(
   // dsh 与 Node 路径，被引用的版本受保护。死会话输出「目录名\t owner 指纹」
   // （owner 供跨用户 scope 判定；功能上线前的老目录 owner 为空）
   const collect = [
-    'for s in $(find "$HOME"' + `/${quote(BASE_DIR_NAME)}` + '/sessions -mindepth 1 -maxdepth 1 -type d 2>/dev/null); do',
+    // 用解析后的绝对 base（安装根可能是 /data/rt 这种绝对路径，不能再假设在家目录下）
+    'for s in $(find ' + quote(baseDir) + '/sessions -mindepth 1 -maxdepth 1 -type d 2>/dev/null); do',
     '  p=$(cat "$s/.runtime/pid" 2>/dev/null)',
     '  if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then',
     '    cat "$s/.runtime/start.sh" 2>/dev/null',

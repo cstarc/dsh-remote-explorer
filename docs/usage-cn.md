@@ -153,7 +153,7 @@ pnpm exec tsx src/cli/bin.ts provision <别名> --cwd //home/user
 | 参数 | 说明 |
 |---|---|
 | `--cwd <路径>` | 远端工作目录（参与会话 id 计算；远端 dsh 进程也在该目录下运行） |
-| `--base-dir <相对路径>` | 安装根（相对远端家目录，默认 `.dsh-remote-explorer/btsd321`，写作 `data/rt` 这种形式、不带前导斜杠；见下文「安装根可改」） |
+| `--base-dir <路径>` | 安装根：绝对路径（`//data/rt`，Git Bash 下用双斜杠）或相对家目录（`data/rt`）；默认 `.dsh-remote-explorer/btsd321`。见下文「安装根可改」 |
 | `--node-version <版本>` | 目标 Node 版本（默认解析 Node 24 最新稳定版） |
 | `--dsh-version <版本>` | 目标 dsh 版本或 dist-tag（默认最大稳定版，无稳定版取最新 rc，alpha 不选；首选装不上时退到次新，最多 3 个；失败回退兜底） |
 | `--refresh-mirrors` | 强制重测镜像延迟 |
@@ -165,7 +165,7 @@ pnpm exec tsx src/cli/bin.ts provision <别名> --cwd //home/user
 
 **版本管理：** Node 按版本隔离装在 `~/.dsh-remote-explorer/btsd321/node/v24.21.0/`，多版本并存，升级从不原地覆盖——这避免了"运行中进程占着文件，写入报 Text file busy"的故障。dsh 相反：装在 `~/.dsh-remote-explorer/btsd321/node_modules/` 的单一安装点，版本不一致就原地升级（npm install 新版本覆盖）。
 
-**安装根可改（`--base-dir` / 插件 Config 的 `baseDir` / 连接表单的「安装根」）：** 默认根是 `~/.dsh-remote-explorer/btsd321`，本工具在远端的一切落盘都在它下面。需要改的典型场景：家目录只读或配额装不下 `node_modules`、同一账号要并行维护两套独立运行时（升级验证）、把运行时挪到数据盘。改根等于换一套独立运行时与 `DSH_HOME`——Node 与 dsh 会在新根重新安装，旧根的会话、插件仓库与凭据材料**不随之迁移**；`~/.agents`（账号级技能）与安装根无关，不受影响。
+**安装根可改（`--base-dir` / 插件 Config 的 `baseDir` / 连接表单的「安装根」）：** 默认根是 `~/.dsh-remote-explorer/btsd321`，本工具在远端的一切落盘都在它下面。需要改的典型场景：家目录只读或配额装不下 `node_modules`、同一账号要并行维护两套独立运行时（升级验证）、把运行时挪到数据盘。改根等于换一套独立运行时与 `DSH_HOME`——Node 与 dsh 会在新根重新安装，旧根的会话、插件仓库与凭据材料**不随之迁移**；`~/.agents`（账号级技能）与安装根无关，不受影响。数据盘不在家目录下时用绝对路径（`/data/dsh-remote-explorer`）：目录会由引导自动创建（父目录需可写），建议指向一个专用目录而不是 `/data` 本身，避免与项目文件混在一起。Git Bash 会改写前导斜杠参数，绝对路径请写 `//data/dsh-remote-explorer` 或先设 `MSYS_NO_PATHCONV=1`。
 
 **机器级共享 vs 会话私有：** 远端根目录下的资源分两类——
 
@@ -204,7 +204,7 @@ DEEPSEEK_API_KEY=sk-xxx pnpm exec tsx src/cli/bin.ts connect <别名> --cwd //ho
 | 参数 | 说明 |
 |---|---|
 | `--cwd <路径>` | 远端工作目录（参与会话 id 计算；远端 dsh 进程也在该目录下运行） |
-| `--base-dir <相对路径>` | 安装根（相对远端家目录，默认 `.dsh-remote-explorer/btsd321`，写作 `data/rt` 这种形式、不带前导斜杠；见下文「安装根可改」） |
+| `--base-dir <路径>` | 安装根：绝对路径（`//data/rt`，Git Bash 下用双斜杠）或相对家目录（`data/rt`）；默认 `.dsh-remote-explorer/btsd321`。见下文「安装根可改」 |
 | `--local-port <端口>` | 本机监听端口（默认由系统分配） |
 | `--no-open` | 不自动打开浏览器 |
 | `--force-restart` | 即便远端已有可用会话也重新启动 |
