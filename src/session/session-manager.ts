@@ -77,6 +77,9 @@ import { attachReverseForward, launch, setupTunnels } from './open-pipeline/tunn
 import { checkWslReverseLink, refreshWslReverseOnReconnect } from './wsl-reverse.js';
 import type { ProxySecret } from '../credential/proxy-secret.js';
 import type { TunnelProxyCredential } from '../credential/tunnel-proxy.js';
+import { readLocalSettings, renderProviderTunnelPatch } from '../credential/provider-routes.js';
+import { renderPatchYaml } from '../provision/profile-writer.js';
+import { quote } from '../util/shell-quote.js';
 import type { CloseSessionOptions, OpenSessionOptions } from './options.js';
 import { createLogger } from '../util/logger.js';
 
@@ -398,6 +401,27 @@ export class RemoteSession {
         { transport: this.transport, paths: this.provisioned.paths },
         { sessionId: this.sessionId, port: this.process.port },
       );
+      // 1.5 patch 与当前反向端点对齐：远端进程重启时会重新读取这份文件。
+      //     反向端口/主机在会话生命周期内可能变化（跨视图恢复、WSL 网关漂移），
+      //     而 patch 是上次 open 时写的——不重写的话，重启出的进程会把模型
+      //     baseURL 指到旧端口，界面表现为「模型设置里还是原来的端口」。
+      const patchFile = this.provisioned.profile.patchFile;
+      if (patchFile !== undefined && this.credential !== undefined) {
+        await writeRemoteTextFile(
+          this.transport, patchFile, renderPatchYaml(this.credential.remotePatches()), {},
+        );
+        const providerPatch = renderProviderTunnelPatch(
+          readLocalSettings() ?? '', this.credential.reversePort, this.credential.reverseHost,
+        );
+        if (providerPatch !== undefined) {
+          // pi-ai 供应商路由含嵌套结构，走与 open 流水线相同的追加路径
+          await this.transport.exec(
+            `printf '\\n%s' ${quote(providerPatch)} >> ${quote(patchFile)}`,
+            { allowNonZeroExit: true },
+          );
+        }
+      }
+
       // 2. 远端端口先复用刚释放的那个：端口稳定，隧道的远端目标完全不用动。
       //    万一端口被占，launch 内部会换端口重试，下一步再把隧道目标同步过去。
       const previousPort = this.process.port;

@@ -175,7 +175,7 @@ export async function prepareSessionProfile(
  * @param patches - patch 条目
  * @returns YAML 文本
  */
-function renderPatchYaml(patches: readonly PatchEntry[]): string {
+export function renderPatchYaml(patches: readonly PatchEntry[]): string {
   const lines: string[] = [];
   for (const patch of patches) {
     lines.push(`- id: ${patch.id}`);
