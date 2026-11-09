@@ -386,11 +386,9 @@ export class RemoteSession {
         { transport: this.transport, paths: this.provisioned.paths },
         { sessionId: this.sessionId, port: this.process.port },
       );
-      // 2. 远端端口优先复用刚释放的那个：端口稳定，远端侧的既有引用不会漂移。
-      //    申请失败（探测不到空闲端口）就沿用旧端口，launch 内部还有一次换端口重试
-      const exclude = this.credential ? [this.credential.reversePort] : [];
-      const [allocated] = await allocateRemotePorts(this.transport, 1, { exclude });
-      const nextPort = allocated ?? this.process.port;
+      // 2. 远端端口先复用刚释放的那个：端口稳定，隧道的远端目标完全不用动。
+      //    万一端口被占，launch 内部会换端口重试，下一步再把隧道目标同步过去。
+      const previousPort = this.process.port;
       // 3. 用同一份引导结果与凭据材料重新拉起（patch 与 credentials 已在盘上）
       this.process = await launch(
         this.transport,
@@ -405,9 +403,12 @@ export class RemoteSession {
           ...(this.options.proxy !== undefined ? { proxy: this.options.proxy } : {}),
           ...(this.options.wslUser !== undefined ? { wslUser: this.options.wslUser } : {}),
         },
-        nextPort,
+        previousPort,
         this.credential,
       );
+      // 3. launch 的端口重试分支可能换了端口：隧道目标必须跟着改，
+      //    否则浏览器会一直撞「转发失败: Connection refused」
+      this.forward.retarget(this.process.port);
       this.register();
       log.info(`远端 dsh 已重启: pid=${this.process.pid}, remotePort=${this.process.port}`);
       return this.url;
@@ -581,6 +582,10 @@ export class RemoteSession {
           port, this.credential,
         );
       }
+
+      // 远端进程换端口（重连重启、或既存进程端口与记录不同）时，正向隧道
+      // 必须同步目标端口，否则浏览器会撞「转发失败: Connection refused」
+      this.forward.retarget(this.process.port);
 
       // 重挂反向转发：旧句柄随旧传输失效，代理实例不动。
       // WSL 的 ReverseListener 跨重连存活（不依赖传输实例），handler 指向

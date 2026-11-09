@@ -299,10 +299,18 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     // 远程页面铺满整窗时，这是用户唯一还能点到「本机侧动作」的地方——重启远端不必
     // 退回管理页，也不必退出应用。全屏时遮蔽条高度归零，工具条随之隐藏（全屏本就不
     // 该有 chrome，返回/停止仍走远端 handoff pill）。
+    // 放出口令：caption 遮蔽条与宿主自己的「应用/编辑」菜单同一区域，而且那条
+    // 带子的底色是半透明的——按钮放进去既看不出边界，又像和宿主控件重叠。
+    // 改成浮层右上角一枚实心胶囊：让位到 caption 下方、Electron 原生窗口按钮
+    // 左侧，对比度、可点面积和层级都明确。
     const toolbar = document.createElement('div');
-    toolbar.style.cssText = `position:absolute;left:10px;top:0;height:${topInset};display:flex;`
-      + 'align-items:center;gap:6px;z-index:3;-webkit-app-region:no-drag;';
-    captionBar.appendChild(toolbar);
+    toolbar.style.cssText = `position:absolute;right:14px;top:calc(${topInset} + 10px);`
+      + 'display:flex;align-items:center;gap:4px;padding:4px;z-index:5;'
+      + 'border-radius:10px;background:rgba(24,24,28,0.92);'
+      + 'border:1px solid rgba(255,255,255,0.14);'
+      + 'box-shadow:0 6px 20px rgba(0,0,0,0.35);'
+      + 'backdrop-filter:blur(6px);-webkit-app-region:no-drag;';
+    container.appendChild(toolbar);
 
     /**
      * 工具条按钮：caption 条本身是拖拽区，按钮必须声明 no-drag 才能点。
@@ -316,9 +324,19 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       button.type = 'button';
       button.title = label;
       button.textContent = label;
-      button.style.cssText = 'all:unset;cursor:pointer;padding:1px 8px;border-radius:6px;'
-        + 'font:inherit;font-size:11px;line-height:16px;color:#d4d4d4;'
-        + 'background:rgba(127,127,127,0.18);-webkit-app-region:no-drag;';
+      button.style.cssText = 'all:unset;cursor:pointer;padding:4px 10px;border-radius:7px;'
+        + 'font:inherit;font-size:12px;line-height:16px;font-weight:600;color:#f0f0f0;'
+        + 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);'
+        + '-webkit-app-region:no-drag;';
+      // 悬停高亮：胶囊浮在远端页面上，必须让用户看得出这是可点的本机控件
+      button.addEventListener('mouseenter', () => {
+        button.style.background = 'rgba(255,255,255,0.2)';
+        button.style.borderColor = 'rgba(255,255,255,0.28)';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.background = 'rgba(255,255,255,0.08)';
+        button.style.borderColor = 'rgba(255,255,255,0.12)';
+      });
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
