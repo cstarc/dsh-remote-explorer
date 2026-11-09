@@ -334,11 +334,35 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       : new ResizeObserver(() => { syncWebviewBox(); });
     resizeObserver?.observe(container);
 
+    /**
+     * 分屏时把宿主应用挤到左侧。
+     *
+     * 只把浮层搬到右边是不够的：宿主界面仍按整窗宽度排版，右边那截就被浮层
+     * 盖住了。把 React 挂载点 `#root` 的宽度收到剩余比例，宿主自己的 grid
+     * （侧栏 + 中间列）会像缩小窗口一样重排，本地界面完整可见且可点。
+     *
+     * 不碰 React 管理的子节点，只改挂载点的内联宽高，卸载时清掉。
+     */
+    function applyHostWidth(): void {
+      const root = document.getElementById('root');
+      if (root === null) return;
+      if (!splitMode) {
+        root.style.width = '';
+        root.style.height = '';
+        root.style.overflow = '';
+        return;
+      }
+      root.style.width = `${(1 - splitRatio) * 100}%`;
+      root.style.height = '100%';
+      root.style.overflow = 'hidden';
+    }
+
     /** 应用分屏布局（整窗 = left:0；分屏 = 左侧让出 (1-ratio)） */
     function applyLayout(): void {
       container.style.left = splitMode ? `${(1 - splitRatio) * 100}%` : '0';
       handle.style.display = splitMode ? 'block' : 'none';
       splitButton.textContent = splitMode ? t('overlayUnsplit') : t('overlaySplit');
+      applyHostWidth();
       syncWebviewBox();
     }
 
@@ -542,6 +566,13 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       window.removeEventListener('keydown', onKeyDown);
       endDrag?.();
       resizeObserver?.disconnect();
+      // 浮层关闭时恢复宿主应用的整窗宽度（分屏状态下尤其不能漏）
+      const hostRoot = document.getElementById('root');
+      if (hostRoot !== null) {
+        hostRoot.style.width = '';
+        hostRoot.style.height = '';
+        hostRoot.style.overflow = '';
+      }
       offOpenRequested?.();
       // lease 校验只认签发者，泄漏会占住 workspace partition——失败也只吞
       if (lease !== undefined && bridge !== undefined) {
