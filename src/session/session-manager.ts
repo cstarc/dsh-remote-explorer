@@ -515,6 +515,9 @@ export class RemoteSession {
         this.process = await launch(
           next, this.provisioned, this.sessionId,
           {
+            // 重连重启远端进程时同样要落到会话的远端工作目录，否则重启后的
+            // 默认会话目录会退回登录目录（家目录）
+            remoteCwd: this.options.remoteCwd,
             ...(this.options.transportType !== undefined ? { transportType: this.options.transportType } : {}),
             ...(this.options.extraEnv !== undefined ? { extraEnv: this.options.extraEnv } : {}),
             ...(this.options.proxy !== undefined ? { proxy: this.options.proxy } : {}),
