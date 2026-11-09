@@ -359,16 +359,6 @@ export function renderSessionRow(
                 >
                   {t('openWindow')}
                 </button>
-                {/* 桌面壳把 http(s) 弹窗转 shell.openExternal：本地窗口留下，远程进浏览器 */}
-                <a
-                  href={session.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  onClick={event => event.stopPropagation()}
-                  style={{ fontSize: 12 }}
-                >
-                  {t('openInBrowser')} ↗
-                </a>
               </>
             )
             : (

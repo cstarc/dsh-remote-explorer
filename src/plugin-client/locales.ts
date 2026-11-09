@@ -21,8 +21,8 @@ export type RemoteExplorerLocaleKey =
   | 'connectWindow' | 'openWindow'
   | 'overlayLoading' | 'overlayStopping' | 'overlayStoppingRemote' | 'overlayLeaseFailed' | 'overlayReturnHint'
   | 'overlaySplit' | 'overlayUnsplit' | 'overlaySplitHint'
-  | 'overlayRestart' | 'overlayRestarting' | 'overlayRestartFailed' | 'overlayOpenInBrowser'
-  | 'restart' | 'openInBrowser'
+  | 'overlayRestart' | 'overlayRestarting' | 'overlayRestartFailed'
+  | 'restart'
   | 'intentDisconnect' | 'intentStop' | 'intentExecute' | 'intentCancel'
   | 'sessions' | 'noSessions' | 'disconnect' | 'stopRemote' | 'open' | 'external'
   | 'stateIdle' | 'stateConnecting' | 'stateConnected' | 'stateHeartbeatMissed'
@@ -97,9 +97,7 @@ export const zh: Record<RemoteExplorerLocaleKey, string> = {
   overlayRestart: '重启远端',
   overlayRestarting: '正在重启远端 dsh（会话与窗口都保留）…',
   overlayRestartFailed: '重启远端 dsh 失败',
-  overlayOpenInBrowser: '浏览器打开',
   restart: '重启',
-  openInBrowser: '浏览器',
   intentDisconnect: '远端窗口请求关闭此远程连接（本机隧道与会话登记将解除，远端 dsh 保留）',
   intentStop: '远端窗口请求停止远端 dsh 并关闭此远程连接',
   intentExecute: '执行',
@@ -231,9 +229,7 @@ export const en: Record<RemoteExplorerLocaleKey, string> = {
   overlayRestart: 'Restart remote',
   overlayRestarting: 'Restarting remote dsh (session and window are kept)…',
   overlayRestartFailed: 'Failed to restart remote dsh',
-  overlayOpenInBrowser: 'Open in browser',
   restart: 'Restart',
-  openInBrowser: 'Browser',
   intentDisconnect: 'The remote window asked to close this remote connection (local tunnel and session registration go away; remote dsh stays)',
   intentStop: 'The remote window asked to stop the remote dsh and close this remote connection',
   intentExecute: 'Execute',
