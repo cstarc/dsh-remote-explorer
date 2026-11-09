@@ -119,7 +119,8 @@ export interface ConnectRequest {
   /** 远端工作目录；缺省用插件配置的 cwd */
   cwd?: string;
   /**
-   * 安装根（相对远端家目录的多段路径）；缺省用插件配置的 baseDir。
+   * 安装根 = 工具自己的根（即 DSH_HOME），**不会再追加** `.dsh-remote-explorer/btsd321`；
+   * 绝对路径（`/data/.dsh-remote-explorer/btsd321`）或相对家目录（`data/rt`）都可，缺省用插件配置的 baseDir。
    *
    * 改根 = 换一套独立运行时与 DSH_HOME（Node/dsh 重新引导），与「远端工作目录」
    * 是两件事：这里决定工具装在哪，cwd 决定远端进程在哪干活。
@@ -229,7 +230,7 @@ interface SupervisedSession {
   hostAlias: string;
   /** 归一化后的远端目录 */
   remoteCwd: string;
-  /** 非默认安装根（相对家目录）；undefined = 内置默认根 */
+  /** 非默认安装根（绝对路径或相对家目录）；undefined = 内置默认根 */
   baseDir: string | undefined;
   /** 传输类型 */
   transportType: TransportType;
@@ -323,7 +324,9 @@ export class SessionSupervisor {
     };
     this.sessions.set(sessionId, record);
     this.push(record, 'info', `发起连接 ${request.hostAlias} → ${remoteCwd || '远端家目录'}`
-      + `${record.baseDir === undefined ? '' : `（安装根 ~/${record.baseDir}）`}`);
+      + `${record.baseDir === undefined
+        ? ''
+        : `（安装根 ${record.baseDir.startsWith('/') ? record.baseDir : `~/${record.baseDir}`}）`}`);
     void this.runOpen(record, request);
     return this.snapshotOf(record);
   }

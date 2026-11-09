@@ -165,7 +165,7 @@ pnpm exec tsx src/cli/bin.ts provision <别名> --cwd //home/user
 
 **版本管理：** Node 按版本隔离装在 `~/.dsh-remote-explorer/btsd321/node/v24.21.0/`，多版本并存，升级从不原地覆盖——这避免了"运行中进程占着文件，写入报 Text file busy"的故障。dsh 相反：装在 `~/.dsh-remote-explorer/btsd321/node_modules/` 的单一安装点，版本不一致就原地升级（npm install 新版本覆盖）。
 
-**安装根可改（`--base-dir` / 插件 Config 的 `baseDir` / 连接表单的「安装根」）：** 默认根是 `~/.dsh-remote-explorer/btsd321`，本工具在远端的一切落盘都在它下面。需要改的典型场景：家目录只读或配额装不下 `node_modules`、同一账号要并行维护两套独立运行时（升级验证）、把运行时挪到数据盘。改根等于换一套独立运行时与 `DSH_HOME`——Node 与 dsh 会在新根重新安装，旧根的会话、插件仓库与凭据材料**不随之迁移**；`~/.agents`（账号级技能）与安装根无关，不受影响。数据盘不在家目录下时用绝对路径（`/data/dsh-remote-explorer`）：目录会由引导自动创建（父目录需可写），建议指向一个专用目录而不是 `/data` 本身，避免与项目文件混在一起。Git Bash 会改写前导斜杠参数，绝对路径请写 `//data/dsh-remote-explorer` 或先设 `MSYS_NO_PATHCONV=1`。
+**安装根可改（`--base-dir` / 插件 Config 的 `baseDir` / 连接表单的「安装根」）：** 默认根是 `~/.dsh-remote-explorer/btsd321`，本工具在远端的一切落盘都在它下面。需要改的典型场景：家目录只读或配额装不下 `node_modules`、同一账号要并行维护两套独立运行时（升级验证）、把运行时挪到数据盘。**注意：配置的这个路径就是工具的根（= `DSH_HOME`），工具不会再追加 `.dsh-remote-explorer/btsd321`。** 所以写 `/data` 时文件直接铺在 `/data` 下，想要传统形态就写全 `/data/.dsh-remote-explorer/btsd321`。改根等于换一套独立运行时与 `DSH_HOME`——Node 与 dsh 会在新根重新安装，旧根的会话、插件仓库与凭据材料**不随之迁移**；`~/.agents`（账号级技能）与安装根无关，不受影响。数据盘不在家目录下时用绝对路径（`/data/dsh-remote-explorer`）：目录会由引导自动创建（父目录需可写），建议指向一个专用目录而不是 `/data` 本身，避免与项目文件混在一起。Git Bash 会改写前导斜杠参数，绝对路径请写 `//data/dsh-remote-explorer` 或先设 `MSYS_NO_PATHCONV=1`。
 
 **机器级共享 vs 会话私有：** 远端根目录下的资源分两类——
 
@@ -541,7 +541,7 @@ pnpm exec tsx scripts/dev-plugin.ts --sync   # 只同步产物进沙箱
 
 **左导航「远程 SSH 会话」**（全局面板，与「插件」按钮平级；0.6.x 起从 Settings 迁出——设置页只放偏好，工作流面板独立成面）：
 
-- 连接表单：主机（下拉来自 `~/.ssh/config`，也可直填 `user@host[:port]`）、远端目录（按主机记忆上次值）、安装根（全局记忆，留空 = 默认根）、高级选项（本机端口 / 强制重启 / 重测镜像 / Node 与 dsh 版本 / 私钥路径 + **三个配置弹窗按钮**）、SSH 密码框。**窗口形态按钮按环境分流**：
+- 连接表单：主机（下拉来自 `~/.ssh/config`，也可直填 `user@host[:port]`）、远端目录（按主机记忆上次值）、安装根（全局记忆，留空 = 默认根；填的就是工具根本身，工具不再追加子目录）、高级选项（本机端口 / 强制重启 / 重测镜像 / Node 与 dsh 版本 / 私钥路径 + **三个配置弹窗按钮**）、SSH 密码框。**窗口形态按钮按环境分流**：
 
   高级选项的三个弹窗（连接前即可配置，全局记忆——**不按主机保存**，记住上一次的输入，换主机连接沿用同一份；存宿主侧 `~/.dsh/remote-advanced.json`，权限 600）：
 
