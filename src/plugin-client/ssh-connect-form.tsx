@@ -42,6 +42,9 @@ const LAST_CWD_KEY_PREFIX = 'dsh-remote-explorer:lastCwd:';
 /** localStorage 里「上次安装根」的键（全局记忆：同一账号下换主机通常仍用同一个根） */
 const BASE_DIR_KEY = 'dsh-remote-explorer:baseDir';
 
+/** localStorage 里「安装根父目录模式」的键（与安装根一起记忆） */
+const BASE_DIR_AUTO_KEY = 'dsh-remote-explorer:baseDirAuto';
+
 /** localStorage 里「上次 dsh 版本」的键（SSH 域，不按主机区分） */
 const DSH_VERSION_KEY = 'dsh-remote-explorer:dshVersion:ssh';
 
@@ -85,6 +88,10 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
   // 安装根：全局记忆（不像 cwd 按主机记——同一个远端账号通常只用一个根）
   const [baseDir, setBaseDir] = React.useState(() => {
     try { return localStorage.getItem(BASE_DIR_KEY) ?? ''; } catch { return ''; }
+  });
+  // 父目录模式：勾上后填 /data 就落到 /data/.dsh-remote-explorer/btsd321，与家目录结构同构
+  const [baseDirAuto, setBaseDirAuto] = React.useState(() => {
+    try { return localStorage.getItem(BASE_DIR_AUTO_KEY) === '1'; } catch { return false; }
   });
   const [password, setPassword] = React.useState('');
   const [privateKey, setPrivateKey] = React.useState('');
@@ -190,7 +197,7 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
       const session = await postConnect({
         hostAlias: host.trim(),
         ...(cwd.trim() !== '' ? { cwd: cwd.trim() } : {}),
-        ...(baseDir.trim() !== '' ? { baseDir: baseDir.trim() } : {}),
+        ...(baseDir.trim() !== '' ? { baseDir: baseDir.trim(), baseDirAuto } : {}),
         ...(password !== '' ? { password } : {}),
         ...(privateKey.trim() !== '' ? { privateKey: privateKey.trim() } : {}),
         ...(Number.isFinite(port) && port > 0 ? { localPort: port } : {}),
@@ -215,6 +222,7 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
       try {
         localStorage.setItem(`${LAST_CWD_KEY_PREFIX}${host.trim()}`, cwd.trim());
         localStorage.setItem(BASE_DIR_KEY, baseDir.trim());
+        localStorage.setItem(BASE_DIR_AUTO_KEY, baseDirAuto ? '1' : '0');
         // dsh 版本按传输形态（SSH）记忆，下次连接时恢复上次选择
         localStorage.setItem(DSH_VERSION_KEY, dshVersion.trim());
         // Node 版本同纪律（SSH 域独立记忆）
@@ -260,6 +268,11 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
           <span style={{ fontSize: 12, opacity: 0.75 }}>{t('baseDir')}</span>
           <input value={baseDir} placeholder={t('baseDirPlaceholder')} style={inputStyle}
             onChange={event => setBaseDir(event.target.value)} />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, opacity: 0.85 }}>
+            <input type="checkbox" checked={baseDirAuto}
+              onChange={event => setBaseDirAuto(event.target.checked)} />
+            {t('baseDirAuto')}
+          </label>
         </label>
       </div>
 

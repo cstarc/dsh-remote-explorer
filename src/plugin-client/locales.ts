@@ -11,7 +11,7 @@ export type RemoteExplorerLocaleKey =
   | 'menuSsh' | 'menuWsl'
   | 'host' | 'hostPlaceholder' | 'refreshHosts'
   | 'hostPickerNoMatch' | 'hostDisconnectExternal'
-  | 'cwd' | 'cwdPlaceholder' | 'baseDir' | 'baseDirPlaceholder'
+  | 'cwd' | 'cwdPlaceholder' | 'baseDir' | 'baseDirPlaceholder' | 'baseDirAuto'
   | 'advanced' | 'localPort' | 'forceRestart' | 'refreshMirrors'
   | 'nodeVersion' | 'dshVersion' | 'privateKey'
   | 'localResourceDownload' | 'localResourceDownloadAuto' | 'localResourceDownloadAlways' | 'localResourceDownloadOff'
@@ -61,7 +61,8 @@ export const zh: Record<RemoteExplorerLocaleKey, string> = {
   cwd: '远端目录',
   cwdPlaceholder: '/home/you/project（留空 = 远端家目录）',
   baseDir: '安装根（绝对路径或相对家目录）',
-  baseDirPlaceholder: '该目录即工具根（不再追加子目录），如 //data/.dsh-remote-explorer/btsd321（留空 = 默认根）',
+  baseDirPlaceholder: '工具根目录或父目录（见下方开关），如 //data 或 //data/.dsh-remote-explorer/btsd321（留空 = 默认根）',
+  baseDirAuto: '自动生成子目录（把上面的路径当父目录：/data → /data/.dsh-remote-explorer/btsd321）',
   advanced: '高级选项',
   localPort: '本机端口（0 = 自动分配）',
   forceRestart: '强制重启远端 dsh',
@@ -194,7 +195,8 @@ export const en: Record<RemoteExplorerLocaleKey, string> = {
   cwd: 'Remote directory',
   cwdPlaceholder: '/home/you/project (empty = remote home)',
   baseDir: 'Install root (absolute or relative to home)',
-  baseDirPlaceholder: 'this directory is the tool root itself (no subdirectory is appended), e.g. //data/.dsh-remote-explorer/btsd321',
+  baseDirPlaceholder: 'tool root, or its parent when the switch below is on (e.g. //data or //data/.dsh-remote-explorer/btsd321)',
+  baseDirAuto: 'Generate the subdirectory (treat the path above as a parent: /data → /data/.dsh-remote-explorer/btsd321)',
   advanced: 'Advanced',
   localPort: 'Local port (0 = auto)',
   forceRestart: 'Force-restart remote dsh',

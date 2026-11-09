@@ -73,6 +73,7 @@ function printHelp(): void {
   println('  --offline                 严格离线引导（也适用于 provision）；环境变量 DSH_REMOTE_OFFLINE=1 对插件同样生效');
   println('  --cwd <远端路径>          远端工作目录，参与会话标识计算，也是远端 dsh 进程的工作目录');
   println('  --base-dir <路径>         安装根：绝对路径（//data/rt）或相对家目录（data/rt），默认 .dsh-remote-explorer/btsd321');
+  println('  --base-dir-auto           把 --base-dir 当父目录，自动追加 .dsh-remote-explorer/btsd321');
   println('  --local-port <端口>       本机监听端口（默认由系统分配）');
   println('  --no-open                 不自动打开浏览器');
   println('  --force-restart           即便远端已有可用会话也重新启动');
@@ -96,6 +97,7 @@ function printHelp(): void {
   println('  --refresh-mirrors         强制重测镜像延迟，忽略缓存');
   println('  --cwd <远端路径>          （provision）远端工作目录');
   println('  --base-dir <路径>         安装根：绝对路径（//data/rt）或相对家目录（data/rt），默认 .dsh-remote-explorer/btsd321');
+  println('  --base-dir-auto           把 --base-dir 当父目录，自动追加 .dsh-remote-explorer/btsd321');
   println(`  --node-version <版本>     （provision）Node 版本（默认 ${versions.node}）`);
   println(`  --dsh-version <版本>      （provision）dsh 版本或 dist-tag（默认${versions.dsh}）`);
   println();
@@ -174,6 +176,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       bundle: { type: 'string' },
       'ssh-config': { type: 'string' },
       'base-dir': { type: 'string' },
+      'base-dir-auto': { type: 'boolean', default: false },
       'refresh-mirrors': { type: 'boolean', default: false },
       cwd: { type: 'string' },
       'node-version': { type: 'string' },
@@ -203,7 +206,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   let installRoot: string | undefined;
   if (values['base-dir'] !== undefined) {
     try {
-      installRoot = resolveInstallRoot(values['base-dir']);
+      installRoot = resolveInstallRoot(values['base-dir'], values['base-dir-auto'] === true);
     } catch (error) {
       printErr(red(toErrorMessage(error)));
       return 64;

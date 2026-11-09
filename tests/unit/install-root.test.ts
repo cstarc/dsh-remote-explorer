@@ -36,6 +36,21 @@ describe('resolveInstallRoot', () => {
     assert.equal(resolveInstallRoot('/data/dsh-remote-explorer'), '/data/dsh-remote-explorer');
   });
 
+  it('父目录模式：自动追加标准子路径（与家目录结构同构）', () => {
+    const SUB = '.dsh-remote-explorer/btsd321';
+    assert.equal(resolveInstallRoot('/data', true), `/data/${SUB}`);
+    assert.equal(resolveInstallRoot('//data', true), `/data/${SUB}`, 'MSYS 双斜杠先归一');
+    assert.equal(resolveInstallRoot('/data/rt/', true), `/data/rt/${SUB}`, '尾斜杠不产生双斜杠');
+    assert.equal(resolveInstallRoot('data', true), `data/${SUB}`);
+    assert.equal(resolveInstallRoot('', true), BASE_DIR_NAME, '没填父目录时仍是默认根');
+    assert.equal(resolveInstallRoot(undefined, true), BASE_DIR_NAME);
+    // 精确模式保持原语义（默认关）
+    assert.equal(resolveInstallRoot('/data'), '/data');
+    assert.equal(resolveInstallRoot('/data', false), '/data');
+    // 父目录模式拼出来的 base 与默认根同构
+    assert.equal(createRemotePaths(HOME, resolveInstallRoot('/data', true)).base, `/data/${SUB}`);
+  });
+
   it('拒绝根目录 / ~ 前缀 / 反斜杠 / 越界段 / 可疑字符 / MSYS 改写', () => {
     assert.throws(() => resolveInstallRoot('/'), /根目录/);
     assert.throws(() => resolveInstallRoot('///'), /根目录/);

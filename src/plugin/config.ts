@@ -34,6 +34,9 @@ export const Config = z.object({
    * 插件仓库与凭据材料都不随之迁移。
    */
   baseDir: z.string().default('').description('远端安装根（绝对路径或相对家目录；空 = .dsh-remote-explorer/btsd321）'),
+  /** 父目录模式：把 baseDir 当父目录，自动追加 .dsh-remote-explorer/btsd321 */
+  baseDirAuto: z.boolean().default(false)
+    .description('把 baseDir 当父目录，自动追加 .dsh-remote-explorer/btsd321（与家目录结构一致）'),
   /** 宿主进程 dispose 时是否保留远端 dsh 进程；默认 false = 连远端一起停 */
   keepRemoteOnDispose: z.boolean().default(false)
     .description('宿主退出时保留远端 dsh 进程（默认一起停止）'),

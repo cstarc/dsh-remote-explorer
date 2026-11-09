@@ -126,6 +126,12 @@ export interface ConnectRequest {
    * 是两件事：这里决定工具装在哪，cwd 决定远端进程在哪干活。
    */
   baseDir?: string;
+  /**
+   * 父目录模式：把 baseDir 当父目录，自动追加 `.dsh-remote-explorer/btsd321`。
+   *
+   * 与家目录下的默认根同构，省得用户自己拼目录名；缺省用插件配置的 baseDirAuto。
+   */
+  baseDirAuto?: boolean;
   /** 传输类型；默认 'ssh' */
   transportType?: TransportType;
   /** WSL 发行版名称（transportType='wsl' 时必需） */
@@ -208,8 +214,10 @@ export interface SupervisorDefaults {
   offline?: boolean;
   /** 默认远端工作目录 */
   cwd: string;
-  /** 默认安装根（相对家目录；空/缺省 = 内置根） */
+  /** 默认安装根（绝对路径或相对家目录；空/缺省 = 内置根） */
   baseDir: string;
+  /** 父目录模式：把 baseDir 当父目录，自动追加标准子路径 */
+  baseDirAuto: boolean;
   /** 默认本机端口（0 = OS 分配） */
   localPort: number;
   /** 默认 Node 版本（空 = provisioner 默认） */
@@ -289,7 +297,10 @@ export class SessionSupervisor {
     // 安装根同样在受理阶段校验：非法形态（绝对路径/~ /反斜杠/可疑字符）在连主机之前拒绝
     let installRoot: string;
     try {
-      installRoot = resolveInstallRoot(request.baseDir ?? this.defaults.baseDir);
+      installRoot = resolveInstallRoot(
+        request.baseDir ?? this.defaults.baseDir,
+        request.baseDirAuto ?? this.defaults.baseDirAuto,
+      );
     } catch (error) {
       throw new SupervisorError('bad_usage', toErrorMessage(error));
     }

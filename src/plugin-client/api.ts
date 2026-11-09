@@ -152,8 +152,10 @@ export interface ConnectBody {
   hostAlias: string;
   /** 远端目录；空串 = 家目录 */
   cwd?: string;
-  /** 安装根（相对远端家目录；空串 = 内置默认根） */
+  /** 安装根（绝对路径或相对远端家目录；空串 = 内置默认根） */
   baseDir?: string;
+  /** 父目录模式：把 baseDir 当父目录，自动追加 .dsh-remote-explorer/btsd321 */
+  baseDirAuto?: boolean;
   /** SSH 密码（仅内存语义，见面板警示文案） */
   password?: string;
   /** 私钥路径 */

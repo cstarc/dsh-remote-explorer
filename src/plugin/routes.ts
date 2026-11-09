@@ -316,6 +316,9 @@ function buildRoutes(supervisor: SessionSupervisor): RouteDef[] {
             ...(stringField(body, 'wslUser') !== undefined ? { wslUser: stringField(body, 'wslUser') } : {}),
             ...(stringField(body, 'cwd') !== undefined ? { cwd: stringField(body, 'cwd') } : {}),
             ...(stringField(body, 'baseDir') !== undefined ? { baseDir: stringField(body, 'baseDir') } : {}),
+            ...(booleanField(body, 'baseDirAuto') !== undefined
+              ? { baseDirAuto: booleanField(body, 'baseDirAuto') }
+              : {}),
             ...(stringField(body, 'password') !== undefined ? { password: stringField(body, 'password') } : {}),
             ...(stringField(body, 'privateKey') !== undefined ? { privateKey: stringField(body, 'privateKey') } : {}),
             ...(numberField(body, 'localPort') !== undefined ? { localPort: numberField(body, 'localPort') } : {}),

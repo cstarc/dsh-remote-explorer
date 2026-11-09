@@ -78,10 +78,28 @@ const INSTALL_ROOT_SEGMENT = /^[A-Za-z0-9._-]+$/;
  * - `$`、引号、通配符：这些名字会拼进远端 shell 命令，只允许安全字符集
  *
  * @param raw - 用户配置值；空串/undefined = 用默认根
+ * @param auto - 父目录模式：把 raw 当父目录，自动追加 `.dsh-remote-explorer/btsd321`
  * @returns 归一后的安装根：绝对路径以 `/` 开头，相对路径无首尾斜杠
  * @throws Error 形态非法
  */
-export function resolveInstallRoot(raw?: string): string {
+export function resolveInstallRoot(raw?: string, auto = false): string {
+  const resolved = resolveInstallRootExact(raw);
+  // 父目录模式：填的目录只是父目录，工具在它下面建自己那套标准结构
+  // （.dsh-remote-explorer/btsd321），与家目录下的默认根完全同构。
+  // 空值仍是默认根——没有「父目录」时无处可追加。
+  if (!auto) return resolved;
+  if (raw === undefined || raw.trim() === '') return resolved;
+  return `${resolved.replace(/\/+$/, '')}/${BASE_DIR_NAME}`;
+}
+
+/**
+ * 校验并归一安装根（精确模式：填什么就是什么）。
+ *
+ * @param raw - 用户配置值；空串/undefined = 用默认根
+ * @returns 归一后的安装根：绝对路径以 `/` 开头，相对路径无首尾斜杠
+ * @throws Error 形态非法
+ */
+function resolveInstallRootExact(raw?: string): string {
   const trimmed = (raw ?? '').trim();
   if (trimmed === '') return BASE_DIR_NAME;
   if (/^[A-Za-z]:/.test(trimmed)) {
