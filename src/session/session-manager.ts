@@ -52,6 +52,7 @@
 import { writeRemoteTextFile } from '../transport/write-text.js';
 import { isAuthFailure } from '../transport/ssh-transport.js';
 import type { ReverseHandle, RemoteTransport } from '../transport/types.js';
+import { BASE_DIR_NAME } from '../provision/remote-paths.js';
 import type { ProvisionResult } from '../provision/provisioner.js';
 import type { RemotePaths } from '../provision/remote-paths.js';
 import { allocateRemotePorts } from '../tunnel/port-allocator.js';
@@ -67,7 +68,7 @@ import {
   DEFAULT_LIFECYCLE_CONFIG, INITIAL_STATE, describeState, isTerminal, transition,
   type LifecycleConfig, type SessionEvent, type SessionState,
 } from './lifecycle-state.js';
-import { removeSession, upsertSession } from './session-registry.js';
+import { findSession, removeSession, upsertSession } from './session-registry.js';
 import { createTransport, resolveSshHost, type SshPrepareContext } from './transport/factory.js';
 import { prepareTransport } from './open-pipeline/prepare.js';
 import { probeAndReadCredentials, probeOrStartRemote } from './open-pipeline/probe.js';
@@ -270,6 +271,17 @@ export class RemoteSession {
    */
   static async open(options: OpenSessionOptions): Promise<RemoteSession> {
     const sessionId = computeSessionId(options.hostAlias, options.remoteCwd);
+    // 安装根不一致警告：同 (主机, 目录) 的会话 id 相同，但 pid/log/凭据材料
+    // 都在上次连接的安装根下——换根后探测扑空会起第二套运行时。安装根换了
+    // 就先断开旧会话（或用相同 --base-dir 重连）。
+    const resolvedRoot = options.installRoot ?? BASE_DIR_NAME;
+    const prior = findSession(sessionId);
+    if (prior?.installRoot !== undefined && prior.installRoot !== resolvedRoot) {
+      const message = `会话 ${sessionId} 此前由安装根 ${prior.installRoot} 维持，当前为 ${resolvedRoot}`
+        + '：两者互不相通，本次将检查/使用当前根下的运行时（旧根进程不受影响）';
+      log.warn(message);
+      options.onStageSkip?.(message);
+    }
     const reconnectConfig = { ...DEFAULT_RECONNECT_CONFIG, ...options.reconnect };
     const lifecycleConfig = { ...DEFAULT_LIFECYCLE_CONFIG, ...options.lifecycle };
 
@@ -423,6 +435,7 @@ export class RemoteSession {
       sessionId: this.sessionId,
       hostAlias: this.options.hostAlias,
       remoteCwd: this.options.remoteCwd,
+      ...(this.options.installRoot !== undefined ? { installRoot: this.options.installRoot } : {}),
       localPort: this.forward.localPort,
       remotePort: this.process.port,
       ...(this.secret ? { reversePort: this.secret.reversePort } : {}),

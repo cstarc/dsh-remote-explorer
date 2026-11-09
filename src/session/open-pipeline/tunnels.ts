@@ -22,6 +22,7 @@ import { LocalForward } from '../../tunnel/forward-local.js';
 import { allocateRemotePorts } from '../../tunnel/port-allocator.js';
 import { startRemoteDsh } from '../remote-process.js';
 import { assertSafeEnvKeys, collectProxyEnv } from '../proxy-env.js';
+import { cancellableWait } from '../cancellable-wait.js';
 import { checkWslReverseLink } from '../wsl-reverse.js';
 import { RemoteError, toErrorMessage } from '../../util/errors.js';
 import { createLogger } from '../../util/logger.js';
@@ -217,37 +218,61 @@ export async function launch(
  * @param options - 打开选项（进度回调）
  * @returns 反向转发句柄；挂不上时 undefined
  */
-export async function attachReverseForward(
+/** 反向转发挂载尝试次数：桌面重启后旧通道的 sshd 端口释放有竞态窗口 */
+  const REVERSE_ATTACH_ATTEMPTS = 3;
+  /** 第 n 次失败后的重试延时（毫秒） */
+  const REVERSE_ATTACH_RETRY_MS = [1_500, 3_000];
+
+  export async function attachReverseForward(
   transport: RemoteTransport,
   credential: TunnelProxyCredential,
   options: Pick<OpenSessionOptions, 'onStageSkip'>,
 ): Promise<ReverseHandle | undefined> {
   const port = credential.reversePort;
-  try {
-    const handle = await transport.forwardIn?.(port, (connection) => {
-      credential.handleReverseConnection(connection.stream);
-    });
-    if (handle === undefined) {
-      // 传输未实现 forwardIn（可选能力）。WSL 路径在 setupTunnels 已分流到
-      // ReverseListener，走到这里说明编排接线错误——按挂接失败处理
-      const message = `传输 ${transport.hostAlias} 不支持 forwardIn，反向端口 ${port} 无法挂接`
-        + '（密钥代理将不可用）';
-      log.error(message, { port, hostAlias: transport.hostAlias });
-      options.onStageSkip?.(message);
-      return undefined;
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= REVERSE_ATTACH_ATTEMPTS; attempt += 1) {
+    try {
+      const handle = await transport.forwardIn?.(port, (connection) => {
+        credential.handleReverseConnection(connection.stream);
+      });
+      if (handle === undefined) {
+        // 传输未实现 forwardIn（可选能力）。WSL 路径在 setupTunnels 已分流到
+        // ReverseListener，走到这里说明编排接线错误——重试无意义，按挂接失败处理
+        const message = `传输 ${transport.hostAlias} 不支持 forwardIn，反向端口 ${port} 无法挂接`
+          + '（密钥代理将不可用）';
+        log.error(message, { port, hostAlias: transport.hostAlias });
+        options.onStageSkip?.(message);
+        return undefined;
+      }
+      // 重试后的成功要留痕：说明确实发生了端口释放竞态，方便回溯
+      if (attempt > 1) {
+        log.info(`反向端口 ${port} 第 ${attempt} 次尝试挂接成功`, { hostAlias: transport.hostAlias });
+      }
+      return handle;
+    } catch (error) {
+      lastError = error;
+      // 最常见：旧会话的 sshd 转发还没释放（应用重启后立刻重连）。等一拍再试，
+      // 而不是立刻降级成「无密钥代理」——那会让远端所有模型调用 no-response
+      log.warn(
+        `反向端口 ${port} 第 ${attempt}/${REVERSE_ATTACH_ATTEMPTS} 次挂接失败（主机 ${transport.hostAlias}）`
+          + `: ${toErrorMessage(error)}`,
+        { port, hostAlias: transport.hostAlias },
+      );
+      if (attempt < REVERSE_ATTACH_ATTEMPTS) {
+        await cancellableWait(REVERSE_ATTACH_RETRY_MS[attempt - 1]!);
+      }
     }
-    return handle;
-  } catch (error) {
-    // 多视图并发持有同一会话时的预期情形；也可能是 sshd 禁了 TcpForwarding。
-    // 不再静默：error 日志留痕（含主机/端口/原因），面板可见跳过说明
-    log.error(
-      `反向端口 ${port} 挂接失败（主机 ${transport.hostAlias}）: ${toErrorMessage(error)}`,
-      { port, hostAlias: transport.hostAlias },
-    );
-    options.onStageSkip?.(
-      `反向端口 ${port} 挂接失败：可能已被同一会话的其他本机进程占用（密钥代理由它维持），`
-        + '或远端 sshd 禁用了端口转发（检查 AllowTcpForwarding）',
-    );
-    return undefined;
   }
+  // 多视图并发持有同一会话时的预期情形；也可能是 sshd 禁了 TcpForwarding。
+  // 不再静默：error 日志留痕（含主机/端口/原因），面板可见跳过说明
+  log.error(
+    `反向端口 ${port} 挂接失败（主机 ${transport.hostAlias}，已重试 ${REVERSE_ATTACH_ATTEMPTS} 次）`
+      + `: ${toErrorMessage(lastError)}`,
+    { port, hostAlias: transport.hostAlias },
+  );
+  options.onStageSkip?.(
+    `反向端口 ${port} 挂接失败（已重试 ${REVERSE_ATTACH_ATTEMPTS} 次）：可能已被同一会话的其他本机进程占用`
+      + '（密钥代理由它维持），或远端 sshd 禁用了端口转发（检查 AllowTcpForwarding）',
+  );
+  return undefined;
 }

@@ -33,6 +33,13 @@ export interface SessionRecord {
   hostAlias: string;
   /** 远端工作目录；未指定时为空串 */
   remoteCwd: string;
+  /**
+   * 维持本会话时使用的安装根（相对家目录或绝对路径）。
+   *
+   * 用于「同一 (主机, 远端目录) 却连到了不同安装根」的辨识：安装根变了，
+   * 会话 id 相同但 pid/log/凭据材料在另一个根下，探测会扑空并起第二套运行时。
+   */
+  installRoot?: string;
   /** 本机转发端口（浏览器访问用） */
   localPort: number;
   /** 远端 dsh 监听端口 */
@@ -105,6 +112,14 @@ const LOCK_STALE_MS = 30_000;
 export function listSessions(): SessionRecord[] {
   const file = readRegistry();
   return file.sessions.filter(record => isLocalPidAlive(record.localPid));
+}
+
+/** 按 id 取一条登记；没有或本机 pid 已死时 undefined */
+export function findSession(sessionId: string): SessionRecord | undefined {
+  const record = readRegistry().sessions.find(item => item.sessionId === sessionId);
+  if (record === undefined) return undefined;
+  if (!isLocalPidAlive(record.localPid)) return undefined;
+  return record;
 }
 
 /**
