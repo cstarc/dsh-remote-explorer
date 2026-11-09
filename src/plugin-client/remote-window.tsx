@@ -65,6 +65,52 @@ const MAX_SPLIT_RATIO = 0.8;
  */
 const MIN_REMOTE_LAYOUT_WIDTH = 960;
 
+/** 浮层工具条位置的持久化键（相对浮层左上角的 px；缺省 = 贴右上角） */
+const TOOLBAR_POS_KEY = 'dsh-remote-explorer:toolbar-pos';
+
+/** 工具条距容器边缘的最小留白（px） */
+const TOOLBAR_MARGIN = 8;
+
+/** 工具条位置（相对浮层容器左上角，px） */
+interface ToolbarPosition {
+  /** 左偏移 */
+  x: number;
+  /** 上偏移 */
+  y: number;
+}
+
+/**
+ * 读回工具条位置。
+ *
+ * @returns 位置；没拖过或数据损坏时 undefined（走默认的右上角布局）
+ */
+function readToolbarPos(): ToolbarPosition | undefined {
+  try {
+    const raw = localStorage.getItem(TOOLBAR_POS_KEY);
+    if (raw === null) return undefined;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) return undefined;
+    const { x, y } = parsed as { x?: unknown; y?: unknown };
+    if (typeof x !== 'number' || typeof y !== 'number') return undefined;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
+    return { x, y };
+  } catch {
+    // localStorage 不可用或内容损坏：用默认位置
+    return undefined;
+  }
+}
+
+/**
+ * 记住工具条位置。
+ *
+ * @param pos - 当前位置
+ */
+function saveToolbarPos(pos: ToolbarPosition): void {
+  try {
+    localStorage.setItem(TOOLBAR_POS_KEY, JSON.stringify({ x: Math.round(pos.x), y: Math.round(pos.y) }));
+  } catch { /* 记忆失败只影响下次打开，不影响本次 */ }
+}
+
 /**
  * 读回分屏偏好。
  *
@@ -221,6 +267,10 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     let splitRatio = initialSplit.ratio;
     /** 拖拽期间挂上的 window 监听：卸载时兜底解绑 */
     let endDrag: (() => void) | undefined;
+    /** 工具条位置；undefined = 还没拖过（默认贴右上角） */
+    let toolbarPos = readToolbarPos();
+    /** 工具条拖动期间的 window 监听（卸载时兜底解绑） */
+    let endToolbarDrag: (() => void) | undefined;
 
     // ---- body 级容器：最高 z-index 盖住主窗口一切网页内容 ----
     // 浮层从 top:0 铺满整窗，不再用 top 让位——改为在浮层内部顶部放一条不透明
@@ -331,7 +381,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     /** 容器尺寸变化时同步 webview（分屏开关、拖分界、窗口缩放都走这里） */
     const resizeObserver = typeof ResizeObserver === 'undefined'
       ? undefined
-      : new ResizeObserver(() => { syncWebviewBox(); });
+      : new ResizeObserver(() => { syncWebviewBox(); applyToolbarPos(); });
     resizeObserver?.observe(container);
 
     /**
@@ -357,6 +407,34 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       root.style.overflow = 'hidden';
     }
 
+    /**
+     * 摆放工具条。
+     *
+     * 没拖过时走 CSS（贴右上角，随容器宽度自适应）；拖过之后用 px 定位，并在
+     * 分屏切换 / 窗口缩放 / 拖到边界时夹回容器内——否则会飘到看不见的地方。
+     */
+    function applyToolbarPos(): void {
+      const rect = container.getBoundingClientRect();
+      if (toolbarPos === undefined) {
+        toolbar.style.left = 'auto';
+        toolbar.style.right = '14px';
+        toolbar.style.top = `calc(${topInset} + 10px)`;
+        return;
+      }
+      const barHeight = Math.round(captionBar.getBoundingClientRect().height);
+      const size = toolbar.getBoundingClientRect();
+      const minY = barHeight + 4;
+      const maxX = Math.max(TOOLBAR_MARGIN, rect.width - size.width - TOOLBAR_MARGIN);
+      const maxY = Math.max(minY, rect.height - size.height - TOOLBAR_MARGIN);
+      toolbarPos = {
+        x: Math.min(Math.max(TOOLBAR_MARGIN, toolbarPos.x), maxX),
+        y: Math.min(Math.max(minY, toolbarPos.y), maxY),
+      };
+      toolbar.style.left = `${Math.round(toolbarPos.x)}px`;
+      toolbar.style.top = `${Math.round(toolbarPos.y)}px`;
+      toolbar.style.right = 'auto';
+    }
+
     /** 应用分屏布局（整窗 = left:0；分屏 = 左侧让出 (1-ratio)） */
     function applyLayout(): void {
       container.style.left = splitMode ? `${(1 - splitRatio) * 100}%` : '0';
@@ -364,6 +442,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       splitButton.textContent = splitMode ? t('overlayUnsplit') : t('overlaySplit');
       applyHostWidth();
       syncWebviewBox();
+      applyToolbarPos();
     }
 
     // ---- 浮层工具条：分屏 / 重启远端 ----
@@ -383,6 +462,58 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       + 'box-shadow:0 6px 20px rgba(0,0,0,0.35);'
       + 'backdrop-filter:blur(6px);-webkit-app-region:no-drag;';
     container.appendChild(toolbar);
+
+    // 握把：明示「可以拖」，并且拖动只从工具条本体（按钮以外）开始，避免
+    // 按住按钮时被当成拖动。位置落 localStorage，下次打开沿用。
+    const toolbarGrip = document.createElement('span');
+    toolbarGrip.textContent = '⠿';
+    toolbarGrip.title = t('overlayToolbarDragHint');
+    toolbarGrip.style.cssText = 'padding:0 2px 0 4px;opacity:0.55;cursor:grab;'
+      + 'font-size:12px;line-height:16px;-webkit-app-region:no-drag;';
+    toolbar.insertBefore(toolbarGrip, toolbar.firstChild);
+    toolbar.style.cursor = 'grab';
+
+    toolbar.addEventListener('mousedown', (event) => {
+      if (event.button !== 0) return;
+      // 点在按钮上：那是点击，不是拖动
+      const pressed = event.target as HTMLElement | null;
+      if (pressed !== null && pressed.closest('button') !== null) return;
+      event.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const box = toolbar.getBoundingClientRect();
+      // 首次拖动：把默认（CSS 定位）换算成 px，拖动不会跳一下
+      toolbarPos ??= { x: box.left - rect.left, y: box.top - rect.top };
+      const offsetX = event.clientX - box.left;
+      const offsetY = event.clientY - box.top;
+      toolbar.style.cursor = 'grabbing';
+      const onMove = (move: MouseEvent): void => {
+        const nextRect = container.getBoundingClientRect();
+        const size = toolbar.getBoundingClientRect();
+        const barHeight = Math.round(captionBar.getBoundingClientRect().height);
+        const minY = barHeight + 4;
+        toolbarPos = {
+          x: Math.min(
+            Math.max(TOOLBAR_MARGIN, move.clientX - nextRect.left - offsetX),
+            Math.max(TOOLBAR_MARGIN, nextRect.width - size.width - TOOLBAR_MARGIN),
+          ),
+          y: Math.min(
+            Math.max(minY, move.clientY - nextRect.top - offsetY),
+            Math.max(minY, nextRect.height - size.height - TOOLBAR_MARGIN),
+          ),
+        };
+        applyToolbarPos();
+      };
+      const onUp = (): void => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        endToolbarDrag = undefined;
+        toolbar.style.cursor = 'grab';
+        if (toolbarPos !== undefined) saveToolbarPos(toolbarPos);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      endToolbarDrag = onUp;
+    });
 
     /**
      * 工具条按钮：caption 条本身是拖拽区，按钮必须声明 no-drag 才能点。
@@ -429,6 +560,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     container.appendChild(status);
     document.body.appendChild(container);
     applyLayout();
+    applyToolbarPos();
 
     /** 显示状态文字（不透明层盖住 webview，避免意图导航失败页闪现） */
     const showStatus = (message: string): void => {
@@ -565,6 +697,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       disposed = true;
       window.removeEventListener('keydown', onKeyDown);
       endDrag?.();
+      endToolbarDrag?.();
       resizeObserver?.disconnect();
       // 浮层关闭时恢复宿主应用的整窗宽度（分屏状态下尤其不能漏）
       const hostRoot = document.getElementById('root');
