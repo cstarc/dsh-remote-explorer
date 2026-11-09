@@ -19,10 +19,10 @@ import * as React from 'react';
 import type { ReactNode } from 'react';
 import type { RemoteExplorerLocaleKey } from './locales.js';
 import {
-  fetchWslDistros, messageOf, postConnect, postDisconnect,
+  fetchWslDistros, messageOf, postConnect, postDisconnect, postRestart,
   type WslDistroSummary,
 } from './api.js';
-import { openRemoteWindow, OVERLAY_INTENT_ORIGIN } from './remote-window.js';
+import { openRemoteWindow, refreshRemoteWindow, OVERLAY_INTENT_ORIGIN } from './remote-window.js';
 import { renderSessionRow } from './ssh-panel.js';
 import { EnvDialog } from './dialogs/env-dialog.js';
 import { createLogger } from '../util/logger.js';
@@ -175,6 +175,27 @@ export function WslSessionPanel(props: WslSessionPanelProps): ReactNode {
       setFormError(messageOf(error));
     } finally {
       setBusy(false);
+    }
+  };
+
+  /**
+   * 重启某会话的远端 dsh（远端装/改插件后让新代码生效，不必退出应用再连）。
+   *
+   * @param target - 会话 id
+   */
+  const onRestart = async (target: string): Promise<void> => {
+    setLoadError('');
+    try {
+      const next = await postRestart(target);
+      if (next.url !== undefined) {
+        refreshRemoteWindow({
+          sessionId: next.sessionId,
+          url: next.url,
+          hostAlias: next.hostAlias,
+        });
+      }
+    } catch (error) {
+      setLoadError(messageOf(error));
     }
   };
 
@@ -341,6 +362,7 @@ export function WslSessionPanel(props: WslSessionPanelProps): ReactNode {
               {sessions.map(session => renderSessionRow(session, selectedId, t, DESKTOP, {
                 onSelect: setSelectedId,
                 onDisconnect: target => { void onDisconnect(target); },
+                onRestart: target => { void onRestart(target); },
               }))}
             </div>
           )}

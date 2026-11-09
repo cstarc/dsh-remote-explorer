@@ -25,6 +25,12 @@ export interface ProvisionCommandOptions {
   alias: string;
   /** 远端工作目录；参与会话 id 计算 */
   cwd: string;
+  /**
+   * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
+   * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
+   */
+  installRoot?: string;
+
   /** 严格离线引导 */
   offline?: boolean;
   /** 目标 Node 版本 */
@@ -93,6 +99,7 @@ export async function runProvision(options: ProvisionCommandOptions): Promise<nu
 
     const result = await provision(transport, {
       sessionId,
+      ...(options.installRoot !== undefined ? { installRoot: options.installRoot } : {}),
       ...(options.offline ? { offline: true } : {}),
       ...(options.nodeVersion ? { nodeVersion: options.nodeVersion } : {}),
       ...(options.dshVersion ? { dshVersion: options.dshVersion } : {}),

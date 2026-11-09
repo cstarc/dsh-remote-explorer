@@ -25,9 +25,9 @@ import type { ReactNode } from 'react';
 import type { SshHostSummary } from '../hosts/ssh-config-parser.js';
 import type { RemoteExplorerLocaleKey } from './locales.js';
 import {
-  fetchHosts, messageOf, postDisconnect, type PanelSession,
+  fetchHosts, messageOf, postDisconnect, postRestart, type PanelSession,
 } from './api.js';
-import { openRemoteWindow } from './remote-window.js';
+import { openRemoteWindow, refreshRemoteWindow } from './remote-window.js';
 import { SshConnectForm } from './ssh-connect-form.js';
 import { STATE_COLORS, STATE_LABEL_KEYS } from '../util/session-display.js';
 import { DESKTOP, HANDOFF_COUNTDOWN_SECONDS } from './constants.js';
@@ -96,6 +96,29 @@ export function SshSessionPanel(props: SshSessionPanelProps): ReactNode {
   const onConnected = (session: PanelSession, mode: 'current' | 'new' | 'window'): void => {
     pendingNav.current = { sessionId: session.sessionId, mode };
     setSelectedId(session.sessionId);
+  };
+
+  /**
+   * 重启某会话的远端 dsh：远端装/改插件后让新代码生效，不必退出应用再连。
+   *
+   * 若桌面浮层正显示该会话，用新地址刷新它（令牌随重启更换）。
+   *
+   * @param target - 会话 id
+   */
+  const onRestart = async (target: string): Promise<void> => {
+    setLoadError('');
+    try {
+      const next = await postRestart(target);
+      if (next.url !== undefined) {
+        refreshRemoteWindow({
+          sessionId: next.sessionId,
+          url: next.url,
+          hostAlias: next.hostAlias,
+        });
+      }
+    } catch (error) {
+      setLoadError(messageOf(error));
+    }
   };
 
   const onDisconnect = async (target: string): Promise<void> => {
@@ -214,6 +237,7 @@ export function SshSessionPanel(props: SshSessionPanelProps): ReactNode {
               {sessions.map(session => renderSessionRow(session, selectedId, t, DESKTOP, {
                 onSelect: setSelectedId,
                 onDisconnect: target => { void onDisconnect(target); },
+                onRestart: target => { void onRestart(target); },
               }))}
             </div>
           )}
@@ -251,6 +275,8 @@ export interface RowActions {
   onSelect: (sessionId: string) => void;
   /** 断开 */
   onDisconnect: (target: string) => void;
+  /** 重启远端 dsh（保留本机隧道与会话 id） */
+  onRestart: (target: string) => void;
 }
 
 /**
@@ -314,24 +340,26 @@ export function renderSessionRow(
           isDesktop
             ? (
               // 桌面端单入口：开整窗浮动桌面（跨 origin 导航会被桌面壳甩给系统浏览器）
-              <button
-                type="button"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  openRemoteWindow({
-                    sessionId: session.sessionId,
-                    url: session.url ?? '',
-                    hostAlias: session.hostAlias,
-                  });
-                }}
-                style={{
+              <>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openRemoteWindow({
+                      sessionId: session.sessionId,
+                      url: session.url ?? '',
+                      hostAlias: session.hostAlias,
+                    });
+                  }}
+                  style={{
                   background: 'transparent', color: 'inherit', fontSize: 12, fontWeight: 600,
                   border: '1px solid rgba(127,127,127,0.5)', borderRadius: 6,
                   padding: '2px 8px', cursor: 'pointer',
                 }}
-              >
-                {t('openWindow')}
-              </button>
+                >
+                  {t('openWindow')}
+                </button>
+              </>
             )
             : (
               // 浏览器端双入口：同标签切入 / 新标签
@@ -357,6 +385,24 @@ export function renderSessionRow(
                 </a>
               </>
             )
+        )
+        : null}
+      {session.url !== undefined && session.external !== true
+        ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              actions.onRestart(session.sessionId);
+            }}
+            style={{
+                  background: 'transparent', color: 'inherit', fontSize: 12, fontWeight: 600,
+                  border: '1px solid rgba(127,127,127,0.5)', borderRadius: 6,
+                  padding: '2px 8px', cursor: 'pointer',
+                }}
+          >
+            {t('restart')}
+          </button>
         )
         : null}
       {session.external === true

@@ -65,6 +65,8 @@ export function apply(ctx: Context, config: PluginConfig): void {
   const supervisor = new SessionSupervisor({
     offline: config.offline,
     cwd: config.cwd,
+    baseDir: config.baseDir,
+    baseDirAuto: config.baseDirAuto,
     localPort: config.localPort,
     nodeVersion: config.nodeVersion,
     dshVersion: config.dshVersion,

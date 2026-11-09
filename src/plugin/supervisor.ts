@@ -18,6 +18,7 @@
  */
 
 import { isOfflineMode } from '../provision/offline-runtime.js';
+import { BASE_DIR_NAME, resolveInstallRoot } from '../provision/remote-paths.js';
 import { openSession, type RemoteSession, type TransportType } from '../session/session-manager.js';
 import { HANDOFF_PROTOCOL_VERSION, type ManageHandlers } from '../handoff/protocol.js';
 import { listSessions } from '../session/session-registry.js';
@@ -117,6 +118,20 @@ export interface ConnectRequest {
   hostAlias: string;
   /** 远端工作目录；缺省用插件配置的 cwd */
   cwd?: string;
+  /**
+   * 安装根 = 工具自己的根（即 DSH_HOME），**不会再追加** `.dsh-remote-explorer/btsd321`；
+   * 绝对路径（`/data/.dsh-remote-explorer/btsd321`）或相对家目录（`data/rt`）都可，缺省用插件配置的 baseDir。
+   *
+   * 改根 = 换一套独立运行时与 DSH_HOME（Node/dsh 重新引导），与「远端工作目录」
+   * 是两件事：这里决定工具装在哪，cwd 决定远端进程在哪干活。
+   */
+  baseDir?: string;
+  /**
+   * 父目录模式：把 baseDir 当父目录，自动追加 `.dsh-remote-explorer/btsd321`。
+   *
+   * 与家目录下的默认根同构，省得用户自己拼目录名；缺省用插件配置的 baseDirAuto。
+   */
+  baseDirAuto?: boolean;
   /** 传输类型；默认 'ssh' */
   transportType?: TransportType;
   /** WSL 发行版名称（transportType='wsl' 时必需） */
@@ -199,6 +214,10 @@ export interface SupervisorDefaults {
   offline?: boolean;
   /** 默认远端工作目录 */
   cwd: string;
+  /** 默认安装根（绝对路径或相对家目录；空/缺省 = 内置根） */
+  baseDir: string;
+  /** 父目录模式：把 baseDir 当父目录，自动追加标准子路径 */
+  baseDirAuto: boolean;
   /** 默认本机端口（0 = OS 分配） */
   localPort: number;
   /** 默认 Node 版本（空 = provisioner 默认） */
@@ -219,6 +238,8 @@ interface SupervisedSession {
   hostAlias: string;
   /** 归一化后的远端目录 */
   remoteCwd: string;
+  /** 非默认安装根（绝对路径或相对家目录）；undefined = 内置默认根 */
+  baseDir: string | undefined;
   /** 传输类型 */
   transportType: TransportType;
   /** 生命周期状态（回调驱动更新） */
@@ -273,6 +294,16 @@ export class SessionSupervisor {
       throw new SupervisorError('invalid_cwd', cwdError);
     }
     const remoteCwd = normalizeRemoteCwd(rawCwd);
+    // 安装根同样在受理阶段校验：非法形态（绝对路径/~ /反斜杠/可疑字符）在连主机之前拒绝
+    let installRoot: string;
+    try {
+      installRoot = resolveInstallRoot(
+        request.baseDir ?? this.defaults.baseDir,
+        request.baseDirAuto ?? this.defaults.baseDirAuto,
+      );
+    } catch (error) {
+      throw new SupervisorError('bad_usage', toErrorMessage(error));
+    }
     const sessionId = computeSessionId(request.hostAlias, remoteCwd);
 
     // 2. 去重：同会话正在连接或已连接时拒绝（复用既有会话请加 forceRestart
@@ -291,6 +322,7 @@ export class SessionSupervisor {
       sessionId,
       hostAlias: request.hostAlias,
       remoteCwd,
+      baseDir: installRoot === BASE_DIR_NAME ? undefined : installRoot,
       transportType,
       state: INITIAL_STATE,
       connecting: true,
@@ -302,7 +334,10 @@ export class SessionSupervisor {
       managerUrl: request.managerUrl,
     };
     this.sessions.set(sessionId, record);
-    this.push(record, 'info', `发起连接 ${request.hostAlias} → ${remoteCwd || '远端家目录'}`);
+    this.push(record, 'info', `发起连接 ${request.hostAlias} → ${remoteCwd || '远端家目录'}`
+      + `${record.baseDir === undefined
+        ? ''
+        : `（安装根 ${record.baseDir.startsWith('/') ? record.baseDir : `~/${record.baseDir}`}）`}`);
     void this.runOpen(record, request);
     return this.snapshotOf(record);
   }
@@ -332,6 +367,48 @@ export class SessionSupervisor {
     this.push(record, 'info', '已断开');
     record.state = { ...record.state, tag: 'disconnected' };
     return record.sessionId;
+  }
+
+  /**
+   * 重启某会话的远端 dsh 进程（本机隧道、凭据代理与会话 id 都不动）。
+   *
+   * 用途：远端装/改插件后让新代码生效、远端进程卡死、换了 dsh 版本想立刻用上。
+   * 与「断开再连接」的差别是本机端口与反向隧道保留，只有远端 pid/端口与访问
+   * 令牌会变——调用方拿返回快照里的 url 重新打开窗口即可。
+   *
+   * @param target - 会话 id 或主机别名
+   * @returns 重启后的快照（url 已是新令牌）
+   * @throws SupervisorError not_found（无本进程会话/已断开）/ still_connecting
+   */
+  async restart(target: string): Promise<SessionSnapshot> {
+    const record = this.find(target);
+    if (record.connecting) {
+      throw new SupervisorError(
+        'still_connecting',
+        `会话 ${record.sessionId.slice(0, 12)}… 仍在连接中，稍后再重启`,
+      );
+    }
+    if (record.session === undefined) {
+      throw new SupervisorError(
+        'not_found',
+        `会话 ${target} 没有可重启的远端进程（已断开，或由其他本机进程维持）`,
+      );
+    }
+    this.push(record, 'info', '重启远端 dsh…');
+    await record.session.restartRemote();
+    record.state = record.session.currentState;
+    this.push(
+      record,
+      'info',
+      `[完成] 远端 dsh 已重启：pid ${record.session.remotePid}，远端端口 ${record.session.remotePort}`,
+    );
+    // 地址里带令牌，日志只报 origin（令牌不落日志的既有约定）
+    this.push(
+      record,
+      'info',
+      `新地址：http://127.0.0.1:${record.session.localPort}（令牌已更换，窗口需重新打开）`,
+    );
+    return this.snapshotOf(record);
   }
 
   /**
@@ -495,6 +572,7 @@ export class SessionSupervisor {
         ...(this.offline ? { offline: true } : {}),
         hostAlias: request.hostAlias,
         remoteCwd: record.remoteCwd,
+        ...(record.baseDir !== undefined ? { installRoot: record.baseDir } : {}),
         // 传输类型与 WSL 参数透传；缺省 'ssh' 保持向后兼容
         transportType: record.transportType,
         ...(request.distroName ? { distroName: request.distroName } : {}),

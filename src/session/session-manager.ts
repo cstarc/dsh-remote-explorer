@@ -361,6 +361,62 @@ export class RemoteSession {
     this.apply({ type: 'disconnect' });
   }
 
+  /**
+   * 重启远端 dsh 进程，会话其余部分保持不动。
+   *
+   * 三个典型用途：远端装/改插件后让新代码生效、远端进程卡死、以及新装了一版
+   * dsh 想立刻用上。与「断开再连接」的区别是本机端口、反向隧道、凭据代理与
+   * sessionId 全部保留——只有远端 pid、远端端口与访问令牌会变，所以调用方拿到
+   * 新 url 重新导航即可（浏览器标签 / 桌面浮层都只需换地址，不必重建会话）。
+   *
+   * 心跳在过程中暂停：停进程的窗口里 pid 与端口都会失效，不暂停会被判成
+   * 「心跳失败」而触发一次多余的重连。
+   *
+   * @returns 新的访问地址（含新令牌）
+   * @throws RemoteError('CONNECT_FAILED') 会话已关闭或重启失败
+   */
+  async restartRemote(): Promise<string> {
+    if (this.closed) {
+      throw new RemoteError('CONNECT_FAILED', '会话已关闭，无法重启远端 dsh');
+    }
+    this.heartbeat?.stop();
+    try {
+      // 1. 停旧进程（pid 优先、端口兜底；绝不用 pkill -f，见 remote-process 文件头）
+      await stopRemoteDsh(
+        { transport: this.transport, paths: this.provisioned.paths },
+        { sessionId: this.sessionId, port: this.process.port },
+      );
+      // 2. 远端端口先复用刚释放的那个：端口稳定，隧道的远端目标完全不用动。
+      //    万一端口被占，launch 内部会换端口重试，下一步再把隧道目标同步过去。
+      const previousPort = this.process.port;
+      // 3. 用同一份引导结果与凭据材料重新拉起（patch 与 credentials 已在盘上）
+      this.process = await launch(
+        this.transport,
+        this.provisioned,
+        this.sessionId,
+        {
+          remoteCwd: this.options.remoteCwd,
+          ...(this.options.transportType !== undefined
+            ? { transportType: this.options.transportType }
+            : {}),
+          ...(this.options.extraEnv !== undefined ? { extraEnv: this.options.extraEnv } : {}),
+          ...(this.options.proxy !== undefined ? { proxy: this.options.proxy } : {}),
+          ...(this.options.wslUser !== undefined ? { wslUser: this.options.wslUser } : {}),
+        },
+        previousPort,
+        this.credential,
+      );
+      // 3. launch 的端口重试分支可能换了端口：隧道目标必须跟着改，
+      //    否则浏览器会一直撞「转发失败: Connection refused」
+      this.forward.retarget(this.process.port);
+      this.register();
+      log.info(`远端 dsh 已重启: pid=${this.process.pid}, remotePort=${this.process.port}`);
+      return this.url;
+    } finally {
+      if (!this.closed) this.startHeartbeat();
+    }
+  }
+
   /** 登记到本机会话表 */
   private register(): void {
     upsertSession({
@@ -515,6 +571,9 @@ export class RemoteSession {
         this.process = await launch(
           next, this.provisioned, this.sessionId,
           {
+            // 重连重启远端进程时同样要落到会话的远端工作目录，否则重启后的
+            // 默认会话目录会退回登录目录（家目录）
+            remoteCwd: this.options.remoteCwd,
             ...(this.options.transportType !== undefined ? { transportType: this.options.transportType } : {}),
             ...(this.options.extraEnv !== undefined ? { extraEnv: this.options.extraEnv } : {}),
             ...(this.options.proxy !== undefined ? { proxy: this.options.proxy } : {}),
@@ -523,6 +582,10 @@ export class RemoteSession {
           port, this.credential,
         );
       }
+
+      // 远端进程换端口（重连重启、或既存进程端口与记录不同）时，正向隧道
+      // 必须同步目标端口，否则浏览器会撞「转发失败: Connection refused」
+      this.forward.retarget(this.process.port);
 
       // 重挂反向转发：旧句柄随旧传输失效，代理实例不动。
       // WSL 的 ReverseListener 跨重连存活（不依赖传输实例），handler 指向

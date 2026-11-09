@@ -152,7 +152,9 @@ pnpm exec tsx src/cli/bin.ts provision <alias> --cwd //home/user
 
 | Option | Description |
 |---|---|
-| `--cwd <path>` | Remote working directory (participates in session id computation) |
+| `--cwd <path>` | Remote working directory (participates in session id computation; the remote dsh process runs there too) |
+| `--base-dir <path>` | Install root: absolute (`//data/rt` under Git Bash) or relative to the remote home (`data/rt`); default `.dsh-remote-explorer/btsd321` |
+| `--base-dir-auto` | Parent-directory mode: treat `--base-dir` as the parent and append `.dsh-remote-explorer/btsd321` (`/data` → `/data/.dsh-remote-explorer/btsd321`, same shape as under home) |
 | `--node-version <ver>` | Target Node version (default: resolve the latest Node 24 stable release) |
 | `--dsh-version <ver>` | Target dsh version or dist-tag (default: highest stable release, falling back to the latest rc when no stable exists; alpha excluded; if the top pick cannot be installed, walks down the candidate chain to the next newest, up to 3 attempts; fallback on failure) |
 | `--refresh-mirrors` | Force re-benchmark mirror latency |
@@ -200,7 +202,9 @@ DEEPSEEK_API_KEY=sk-xxx pnpm exec tsx src/cli/bin.ts connect <alias> --cwd //hom
 
 | Option | Description |
 |---|---|
-| `--cwd <path>` | Remote working directory (participates in session id computation) |
+| `--cwd <path>` | Remote working directory (participates in session id computation; the remote dsh process runs there too) |
+| `--base-dir <path>` | Install root: absolute (`//data/rt` under Git Bash) or relative to the remote home (`data/rt`); default `.dsh-remote-explorer/btsd321` |
+| `--base-dir-auto` | Parent-directory mode: treat `--base-dir` as the parent and append `.dsh-remote-explorer/btsd321` (`/data` → `/data/.dsh-remote-explorer/btsd321`, same shape as under home) |
 | `--local-port <port>` | Local listening port (default: OS-assigned) |
 | `--no-open` | Do not auto-open the browser |
 | `--force-restart` | Restart remote dsh even if an existing session is available |
@@ -549,7 +553,7 @@ Restart `dsh web` after installing (dsh contract: package replacement requires a
   **Connect log**: every connection prints all effective advanced options to the progress log (host and transport type, jump chain with its source, env var key names, proxy address with userinfo masked, port/version/toggles/private-key presence) — one glance answers "what am I actually connecting with".
   - **Desktop (DeepSeek Harness)**: a single "Connect in new window" button — once the session is ready it opens a **full-window floating desktop** (the desktop shell is a single OS window; every http/https popup and cross-origin navigation is redirected to the system browser, so the only in-app carrier is a webview; the opaque overlay fills the window — opening it hides the main desktop and its title-bar buttons, collapsing restores it, and minimize/fullscreen move the whole window). **No self-made top bar**: the remote dsh web UI fills the window; being web-form it renders no desktop title bar ("App/Edit" menus are an Electron desktop-shell feature the remote web page does not have), so back/close/stop all go through the remote sidebar's status pill (see [Remote window handoff](#remote-window-handoff)); Esc also collapses while the webview has not taken focus. After an app reload the overlay is not restored — reopen it from the panel
   - **Browser**: the dual entry points (VS Code-style) — "Connect in current tab" = after the session is ready, a 3-second cancellable countdown navigates this tab into the remote window; "Connect in new tab" = this page stays as the manager and the session row opens the remote in a new tab
-- Session table: state dot, local port, the row entry (desktop: "Open in new window" = the full-window floating desktop; browser: "Enter (current tab)" and "Open in new tab ↗", the new tab serving the **remote dsh UI through the tunnel**), a "Disconnect" button (with "Also stop remote dsh" checked by default); sessions kept by other local processes are marked "external" and read-only
+- Session table: state dot, local port, the row entry (desktop: "Open in new window" = the full-window floating desktop; browser: "Enter (current tab)" and "Open in new tab ↗", the new tab serving the **remote dsh UI through the tunnel**), a "Restart" button (restarts only the remote dsh: local port, tunnel, credential proxy and session id are kept — use it to pick up remote plugin changes without leaving the app), a "Disconnect" button (with "Also stop remote dsh" checked by default); sessions kept by other local processes are marked "external" and read-only
 - Progress log: incremental live tail of the selected session (provisioning stages, state transitions, errors)
 
 **Slash command** (chat composer):

@@ -135,7 +135,7 @@ export async function launch(
   transport: RemoteTransport,
   provisioned: ProvisionResult,
   sessionId: string,
-  options: Pick<OpenSessionOptions, 'onStageStart' | 'onStageDone' | 'transportType' | 'proxy' | 'extraEnv' | 'wslUser'>,
+  options: Pick<OpenSessionOptions, 'onStageStart' | 'onStageDone' | 'transportType' | 'proxy' | 'extraEnv' | 'wslUser' | 'remoteCwd'>,
   port: number,
   credential: TunnelProxyCredential | undefined,
 ): Promise<RemoteProcessInfo> {
@@ -173,6 +173,8 @@ export async function launch(
         dshHome: provisioned.profile.dshHome,
         profileName: provisioned.profile.profileName,
         nodeBinDir: provisioned.node.binDir,
+        // 远端工作目录参与启动脚本的 cd：远端 dsh 的 cwd 决定远端窗口的默认会话目录
+        cwd: options.remoteCwd,
         port,
         ...(provisioned.profile.patchFile ? { patchFile: provisioned.profile.patchFile } : {}),
         ...(Object.keys(extraEnv).length > 0 ? { extraEnv } : {}),

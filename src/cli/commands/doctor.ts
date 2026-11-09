@@ -45,6 +45,11 @@ export interface DoctorOptions {
   privateKey?: string;
   /** 固定密码（--password）：显式走密码认证 */
   password?: string;
+  /**
+   * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
+   * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
+   */
+  installRoot?: string;
 }
 
 /** 单项检查的结论 */
@@ -117,10 +122,10 @@ export async function runDoctor(options: DoctorOptions): Promise<number> {
     if (connFatal) { report(findings); return 1; }
 
     // 探测远端环境（home 目录、基础工具等）
-    const probe = await checkProbe(transport, progress, findings);
+    const probe = await checkProbe(transport, progress, findings, options.installRoot);
     if (!probe) { report(findings); return 1; }
 
-    const paths = createRemotePaths(probe.homeDir);
+    const paths = createRemotePaths(probe.homeDir, options.installRoot);
     const ctx: RemoteContext = { transport, paths };
 
     // 基础命令检查
@@ -246,16 +251,18 @@ async function checkConnection(
 /**
  * 探测远端环境（home 目录、基础工具清单等）。
  *
+ * @param installRoot - 安装根（相对家目录）；省略用默认根
  * @returns 探测结果；null 表示致命错误
  */
 async function checkProbe(
   transport: RemoteTransport,
   progress: ProgressReporter,
   findings: Finding[],
+  installRoot?: string,
 ): Promise<ProbeResult | null> {
   progress.start('探测远端环境');
   try {
-    const probe = await probeRemote(transport, undefined, isOfflineMode());
+    const probe = await probeRemote(transport, undefined, isOfflineMode(), installRoot);
     progress.done(`home=${probe.homeDir}`);
     return probe;
   } catch (error) {

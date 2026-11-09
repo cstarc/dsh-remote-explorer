@@ -51,7 +51,7 @@ export class LocalForward {
   constructor(
     transport: RemoteTransport,
     private readonly remoteHost: string,
-    private readonly remotePort: number,
+    private remotePort: number,
     private readonly hooks: LocalForwardHooks = {},
   ) {
     this.transport = transport;
@@ -127,6 +127,22 @@ export class LocalForward {
   swapTransport(transport: RemoteTransport): void {
     this.transport = transport;
     // 主动断开依附旧传输的连接，让浏览器立刻重连而不是卡在半死的连接上
+    for (const socket of this.sockets) socket.destroy();
+    this.sockets.clear();
+  }
+
+  /**
+   * 换远端目标端口（远端 dsh 重启后端口可能变）。
+   *
+   * 本机监听端口与已建立的连接都不动——浏览器/桌面浮层只需重新导航到同一
+   * origin 的新令牌地址。之后新建的 SSH 通道按新端口转发；旧连接依附在已
+   * 失效的目标上，由浏览器自行重试。
+   *
+   * @param remotePort - 新的远端端口
+   */
+  retarget(remotePort: number): void {
+    this.remotePort = remotePort;
+    // 已建立的连接指向旧端口的进程，留着只会不断失败——主动断掉让浏览器重连
     for (const socket of this.sockets) socket.destroy();
     this.sockets.clear();
   }

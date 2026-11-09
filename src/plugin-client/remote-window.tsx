@@ -32,7 +32,7 @@ import { overlayTopInset, adaptOverlayRoot } from './overlay-inset.js';
 import { createLogger } from '../util/logger.js';
 
 const log = createLogger('remote-window');
-import { postDisconnect } from './api.js';
+import { postDisconnect, postRestart } from './api.js';
 import type { RemoteExplorerLocaleKey } from './locales.js';
 
 /**
@@ -44,12 +44,72 @@ import type { RemoteExplorerLocaleKey } from './locales.js';
  */
 export const OVERLAY_INTENT_ORIGIN = 'https://dsh-remote-handoff.overlay';
 
+/** 分屏开关的持久化键（用户偏好，跨会话记住） */
+const SPLIT_MODE_KEY = 'dsh-remote-explorer:split-mode';
+
+/** 分屏比例的持久化键（远程窗占右侧的比例） */
+const SPLIT_RATIO_KEY = 'dsh-remote-explorer:split-ratio';
+
+/** 默认分屏比例 */
+const DEFAULT_SPLIT_RATIO = 0.5;
+
+/** 比例上下限：两侧都至少留 20%，否则分屏没有操作意义 */
+const MIN_SPLIT_RATIO = 0.2;
+const MAX_SPLIT_RATIO = 0.8;
+
+/**
+ * 远端页面在分屏下的最小可读布局宽度（CSS px）。
+ *
+ * 远端界面（侧栏 + 对话区）有自己的最小宽度，容器窄于此就整体缩放而不是
+ * 让内容溢出被裁。
+ */
+const MIN_REMOTE_LAYOUT_WIDTH = 960;
+
+/**
+ * 读回分屏偏好。
+ *
+ * @returns 是否分屏 + 归一后的比例
+ */
+function readSplitState(): { split: boolean; ratio: number } {
+  try {
+    const split = localStorage.getItem(SPLIT_MODE_KEY) === '1';
+    const raw = Number.parseFloat(localStorage.getItem(SPLIT_RATIO_KEY) ?? '');
+    const ratio = Number.isFinite(raw)
+      ? Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, raw))
+      : DEFAULT_SPLIT_RATIO;
+    return { split, ratio };
+  } catch {
+    // 隐私模式等场景 localStorage 不可用：不记忆，用默认整窗
+    return { split: false, ratio: DEFAULT_SPLIT_RATIO };
+  }
+}
+
+/**
+ * 记住分屏偏好。
+ *
+ * @param split - 是否分屏
+ * @param ratio - 远程窗占比
+ */
+function saveSplitState(split: boolean, ratio: number): void {
+  try {
+    localStorage.setItem(SPLIT_MODE_KEY, split ? '1' : '0');
+    localStorage.setItem(SPLIT_RATIO_KEY, String(ratio));
+  } catch { /* 记忆失败只影响下次默认值，不影响本次布局 */ }
+}
+
 /** Electron webview 元素的最小扩展面（loadURL/getURL 由 Electron 注入，DOM 标准类型没有） */
 interface WebViewElement extends HTMLWebViewElement {
   /** 导航到指定 URL（返回 Promise，加载失败 reject） */
   loadURL(url: string): Promise<void>;
   /** 当前 URL */
   getURL(): string;
+  /**
+   * 设置 guest 页面的缩放系数（Electron webview 注入；旧版可能没有）。
+   *
+   * 分屏时用它整体缩小远端页面：远端界面有自己的最小布局宽度，硬挤窄会把
+   * 右侧裁掉，缩放能让整页仍然完整可见。
+   */
+  setZoomFactor?(factor: number): void;
 }
 
 /** Electron webview 的 will-navigate 事件（Electron 注入，DOM 标准类型没有） */
@@ -101,6 +161,20 @@ export function openRemoteWindow(next: RemoteWindowTarget): void {
   publish();
 }
 
+/**
+ * 会话重启后刷新已打开的浮层目标。
+ *
+ * 只有当前正显示同一会话时才更新——否则会把用户没打开的窗口硬拉起来。
+ * 目标换 url 会触发浮层 effect 重建 webview（令牌随重启更换，旧地址会 401）。
+ *
+ * @param next - 新目标（sessionId 用于判同）
+ */
+export function refreshRemoteWindow(next: RemoteWindowTarget): void {
+  if (currentTarget === null || currentTarget.sessionId !== next.sessionId) return;
+  currentTarget = next;
+  publish();
+}
+
 /** 收起浮层（lease 由组件 effect 清理时 release；远端会话保留） */
 export function closeRemoteWindow(): void {
   if (currentTarget !== null) {
@@ -139,6 +213,14 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     let disposed = false;
     let lease: string | undefined;
     let offOpenRequested: (() => void) | undefined;
+    /** webview 实例：工具条的重启/分屏要在 acquire 之后才拿得到 */
+    let webview: WebViewElement | undefined;
+    /** 分屏状态（从 localStorage 恢复，整窗/分屏随用户切换） */
+    const initialSplit = readSplitState();
+    let splitMode = initialSplit.split;
+    let splitRatio = initialSplit.ratio;
+    /** 拖拽期间挂上的 window 监听：卸载时兜底解绑 */
+    let endDrag: (() => void) | undefined;
 
     // ---- body 级容器：最高 z-index 盖住主窗口一切网页内容 ----
     // 浮层从 top:0 铺满整窗，不再用 top 让位——改为在浮层内部顶部放一条不透明
@@ -191,9 +273,162 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       + 'font-family:inherit;text-align:center;padding:24px;white-space:pre-wrap;'
       + 'background:var(--dsw-alias-bg-base,#101014);';
     status.textContent = t('overlayLoading');
+    // ---- 分屏：容器只占右侧一段，左边露出宿主界面（本地窗口与远程窗口同屏） ----
+    // 远程页面在 webview 内自适应宽度，宿主界面在左侧仍可完整操作；拖动分隔条
+    // 调比例，偏好落 localStorage。
+    /** 左侧拖拽分隔条（只在分屏时可点） */
+    const handle = document.createElement('div');
+    handle.title = t('overlaySplitHint');
+    handle.style.cssText = 'position:absolute;left:0;top:0;bottom:0;width:6px;margin-left:-3px;'
+      + 'cursor:col-resize;z-index:4;-webkit-app-region:no-drag;display:none;';
+    handle.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      const onMove = (moveEvent: MouseEvent): void => {
+        splitRatio = Math.min(
+          MAX_SPLIT_RATIO,
+          Math.max(MIN_SPLIT_RATIO, 1 - moveEvent.clientX / window.innerWidth),
+        );
+        applyLayout();
+      };
+      const onUp = (): void => {
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+        endDrag = undefined;
+        saveSplitState(splitMode, splitRatio);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+      endDrag = onUp;
+    });
+    container.appendChild(handle);
+
+    /**
+     * 把 webview 的盒子按容器当前度量写成显式 px，并按宽度整体缩放。
+     *
+     * 为什么不能只靠 inset：容器（浮层）改变宽度后，Electron 的 guest 表面并非
+     * 总会跟着重排——实测分屏后远端页面仍按整窗宽度排版，右半边直接被裁掉。
+     * 显式写宽高能强制 guest 重算尺寸；再叠加 zoom-to-fit，窄窗下整页完整可见。
+     */
+    function syncWebviewBox(): void {
+      const view = webview;
+      if (view === undefined) return;
+      const barHeight = Math.round(captionBar.getBoundingClientRect().height);
+      const rect = container.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height - barHeight));
+      view.style.left = '0';
+      view.style.top = `${barHeight}px`;
+      view.style.right = 'auto';
+      view.style.bottom = 'auto';
+      view.style.width = `${width}px`;
+      view.style.height = `${height}px`;
+      const zoom = Math.max(0.5, Math.min(1, width / MIN_REMOTE_LAYOUT_WIDTH));
+      try {
+        view.setZoomFactor?.(Number(zoom.toFixed(3)));
+      } catch { /* 旧版 webview 没有该 API：只失去缩放，不影响布局 */ }
+    }
+
+    /** 容器尺寸变化时同步 webview（分屏开关、拖分界、窗口缩放都走这里） */
+    const resizeObserver = typeof ResizeObserver === 'undefined'
+      ? undefined
+      : new ResizeObserver(() => { syncWebviewBox(); });
+    resizeObserver?.observe(container);
+
+    /**
+     * 分屏时把宿主应用挤到左侧。
+     *
+     * 只把浮层搬到右边是不够的：宿主界面仍按整窗宽度排版，右边那截就被浮层
+     * 盖住了。把 React 挂载点 `#root` 的宽度收到剩余比例，宿主自己的 grid
+     * （侧栏 + 中间列）会像缩小窗口一样重排，本地界面完整可见且可点。
+     *
+     * 不碰 React 管理的子节点，只改挂载点的内联宽高，卸载时清掉。
+     */
+    function applyHostWidth(): void {
+      const root = document.getElementById('root');
+      if (root === null) return;
+      if (!splitMode) {
+        root.style.width = '';
+        root.style.height = '';
+        root.style.overflow = '';
+        return;
+      }
+      root.style.width = `${(1 - splitRatio) * 100}%`;
+      root.style.height = '100%';
+      root.style.overflow = 'hidden';
+    }
+
+    /** 应用分屏布局（整窗 = left:0；分屏 = 左侧让出 (1-ratio)） */
+    function applyLayout(): void {
+      container.style.left = splitMode ? `${(1 - splitRatio) * 100}%` : '0';
+      handle.style.display = splitMode ? 'block' : 'none';
+      splitButton.textContent = splitMode ? t('overlayUnsplit') : t('overlaySplit');
+      applyHostWidth();
+      syncWebviewBox();
+    }
+
+    // ---- 浮层工具条：分屏 / 重启远端 ----
+    // 放在 caption 遮蔽条里（宿主 caption 控件已被盖住，这条带子本来就只用于拖窗）：
+    // 远程页面铺满整窗时，这是用户唯一还能点到「本机侧动作」的地方——重启远端不必
+    // 退回管理页，也不必退出应用。全屏时遮蔽条高度归零，工具条随之隐藏（全屏本就不
+    // 该有 chrome，返回/停止仍走远端 handoff pill）。
+    // 放出口令：caption 遮蔽条与宿主自己的「应用/编辑」菜单同一区域，而且那条
+    // 带子的底色是半透明的——按钮放进去既看不出边界，又像和宿主控件重叠。
+    // 改成浮层右上角一枚实心胶囊：让位到 caption 下方、Electron 原生窗口按钮
+    // 左侧，对比度、可点面积和层级都明确。
+    const toolbar = document.createElement('div');
+    toolbar.style.cssText = `position:absolute;right:14px;top:calc(${topInset} + 10px);`
+      + 'display:flex;align-items:center;gap:4px;padding:4px;z-index:5;'
+      + 'border-radius:10px;background:rgba(24,24,28,0.92);'
+      + 'border:1px solid rgba(255,255,255,0.14);'
+      + 'box-shadow:0 6px 20px rgba(0,0,0,0.35);'
+      + 'backdrop-filter:blur(6px);-webkit-app-region:no-drag;';
+    container.appendChild(toolbar);
+
+    /**
+     * 工具条按钮：caption 条本身是拖拽区，按钮必须声明 no-drag 才能点。
+     *
+     * @param label - 文案（同时作 title）
+     * @param onClick - 点击回调
+     * @returns 按钮元素
+     */
+    const toolButton = (label: string, onClick: () => void): HTMLButtonElement => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.title = label;
+      button.textContent = label;
+      button.style.cssText = 'all:unset;cursor:pointer;padding:4px 10px;border-radius:7px;'
+        + 'font:inherit;font-size:12px;line-height:16px;font-weight:600;color:#f0f0f0;'
+        + 'background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);'
+        + '-webkit-app-region:no-drag;';
+      // 悬停高亮：胶囊浮在远端页面上，必须让用户看得出这是可点的本机控件
+      button.addEventListener('mouseenter', () => {
+        button.style.background = 'rgba(255,255,255,0.2)';
+        button.style.borderColor = 'rgba(255,255,255,0.28)';
+      });
+      button.addEventListener('mouseleave', () => {
+        button.style.background = 'rgba(255,255,255,0.08)';
+        button.style.borderColor = 'rgba(255,255,255,0.12)';
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      });
+      return button;
+    };
+
+    const splitButton = toolButton(t('overlaySplit'), () => {
+      splitMode = !splitMode;
+      applyLayout();
+      saveSplitState(splitMode, splitRatio);
+    });
+    toolbar.appendChild(splitButton);
+    toolbar.appendChild(toolButton(t('overlayRestart'), () => { runRestart(target.sessionId); }));
+
     container.appendChild(captionBar);
     container.appendChild(status);
     document.body.appendChild(container);
+    applyLayout();
 
     /** 显示状态文字（不透明层盖住 webview，避免意图导航失败页闪现） */
     const showStatus = (message: string): void => {
@@ -214,6 +449,40 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
           if (!disposed) showStatus(`${messageOf(error)}\n${t('overlayReturnHint')}`);
         });
     };
+
+    /**
+     * 重启远端 dsh 并在原 webview 里换成新地址。
+     *
+     * 令牌随重启更换，旧 url 会 401，所以必须 loadURL 新地址；本机端口不变，
+     * 不会影响其它已经打开的页面。
+     */
+    // 用函数声明而不是 const 箭头：工具条按钮在上面就引用了它（声明提升）
+    function runRestart(sessionId: string): void {
+      showStatus(t('overlayRestarting'));
+      void postRestart(sessionId)
+        .then((session) => {
+          if (disposed) return;
+          const nextUrl = session.url;
+          if (nextUrl === undefined) {
+            showStatus(t('overlayRestartFailed'));
+            return;
+          }
+          const view = webview;
+          if (view === undefined) { showWebview(); return; }
+          view.loadURL(nextUrl)
+            .then(() => { if (!disposed) showWebview(); })
+            .catch((error: unknown) => {
+              if (!disposed) {
+                showStatus(`${t('overlayRestartFailed')}：${messageOf(error)}\n${t('overlayReturnHint')}`);
+              }
+            });
+        })
+        .catch((error: unknown) => {
+          if (!disposed) {
+            showStatus(`${t('overlayRestartFailed')}：${messageOf(error)}\n${t('overlayReturnHint')}`);
+          }
+        });
+    }
 
     /**
      * 解析并执行一个意图 URL；非意图 origin 返回 false（放行给远程页面自身导航）。
@@ -255,14 +524,12 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
           offOpenRequested = bridge.onOpenRequested(result.lease, (url) => { handleIntentUrl(url); });
           // 3. 创建 webview（about:blank#<lease> + partition，主进程据此校验放行）
           const element = document.createElement('webview') as unknown as WebViewElement;
+          webview = element;
           element.setAttribute('src', `about:blank#${result.lease}`);
           element.setAttribute('partition', result.partition);
-          // webview 全程可见（隐藏 attach 会丢尺寸，见状态层注释）；加载态由
-          // 不透明状态层盖住，就绪后隐藏状态层即可。top 偏移到遮蔽条底部
-          // （caption 行下方），不覆盖 caption 遮蔽条。
-          // 不用 height:100%——包含块是整窗高度，加 top 偏移后 100% 会溢出底部
-          // （底部内容被截到窗口外）。用 top+bottom:0 撑满遮蔽条下方的剩余空间。
-          element.style.cssText = `position:absolute;left:0;right:0;bottom:0;top:${topInset};border:none;`;
+          // 尺寸一律由 syncWebviewBox() 写成显式 px：inset 自适应在容器变化后
+          // 不一定让 guest 重排（见该函数注释）。这里只定定位方式。
+          element.style.cssText = 'position:absolute;left:0;top:0;border:none;';
           // 4. 首次 dom-ready（about:blank#lease 就绪 = attach 通过）后 loadURL
           element.addEventListener('dom-ready', () => {
             if (element.dataset.loaded === '1') return;
@@ -278,12 +545,15 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
                 if (!disposed) showStatus(`${t('overlayLeaseFailed')}：${messageOf(error)}\n${t('overlayReturnHint')}`);
               });
           });
+          // 每次加载完成都重放一次尺寸与缩放（导航可能重置 guest 的 zoom）
+          element.addEventListener('did-finish-load', () => { syncWebviewBox(); });
           // 5. handoff「关闭/停止并返回」经 location.href 触发主框架导航，这里截获
           element.addEventListener('will-navigate', (event) => {
             const url = (event as WillNavigateEvent).url ?? element.getURL();
             handleIntentUrl(url);
           });
           container.appendChild(element);
+          syncWebviewBox();
         })
         .catch((error: unknown) => {
           log.error('acquire 失败', messageOf(error));
@@ -294,6 +564,15 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     return () => {
       disposed = true;
       window.removeEventListener('keydown', onKeyDown);
+      endDrag?.();
+      resizeObserver?.disconnect();
+      // 浮层关闭时恢复宿主应用的整窗宽度（分屏状态下尤其不能漏）
+      const hostRoot = document.getElementById('root');
+      if (hostRoot !== null) {
+        hostRoot.style.width = '';
+        hostRoot.style.height = '';
+        hostRoot.style.overflow = '';
+      }
       offOpenRequested?.();
       // lease 校验只认签发者，泄漏会占住 workspace partition——失败也只吞
       if (lease !== undefined && bridge !== undefined) {

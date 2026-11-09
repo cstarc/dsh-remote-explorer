@@ -59,11 +59,104 @@ const LOCAL_HOST_TAG = createHash('sha1').update(hostname()).digest('hex').slice
  */
 export const BASE_DIR_NAME = '.dsh-remote-explorer/btsd321';
 
+/** 安装根单段的允许字符：不含空白/通配/引号/\$，杜绝 shell 注入面 */
+const INSTALL_ROOT_SEGMENT = /^[A-Za-z0-9._-]+$/;
+
+/**
+ * 解析并归一安装根：绝对路径（`/data/rt`）或相对家目录的路径（`data/rt`）。
+ *
+ * 允许改根是为了这几种真实场景：家目录只读或配额很小（装不下 node_modules）、
+ * 同一账号要并行维护两套独立运行时（升级验证）、以及把整套运行时放到数据盘。
+ * 数据盘通常**不在家目录下**（`/data`、`/opt`、`/mnt/disk1`），所以绝对路径
+ * 与相对路径都要支持：相对路径跟着账号家目录走（多人共用同一份配置时更稳），
+ * 绝对路径钉死位置（数据盘与家目录不在同一块盘时唯一选择）。
+ *
+ * 拒绝的形态及原因：
+ * - `~` 前缀 / 根目录 `/`：前者本工具自己就能展开，后者等于把运行时摊在根分区
+ * - `.` / `..` 段：相对根的越界写法，用途不明且容易写错
+ * - 反斜杠与空白：远端一定是 POSIX，反斜杠是误把 Windows 路径当远端路径
+ * - `$`、引号、通配符：这些名字会拼进远端 shell 命令，只允许安全字符集
+ *
+ * @param raw - 用户配置值；空串/undefined = 用默认根
+ * @param auto - 父目录模式：把 raw 当父目录，自动追加 `.dsh-remote-explorer/btsd321`
+ * @returns 归一后的安装根：绝对路径以 `/` 开头，相对路径无首尾斜杠
+ * @throws Error 形态非法
+ */
+export function resolveInstallRoot(raw?: string, auto = false): string {
+  const resolved = resolveInstallRootExact(raw);
+  // 父目录模式：填的目录只是父目录，工具在它下面建自己那套标准结构
+  // （.dsh-remote-explorer/btsd321），与家目录下的默认根完全同构。
+  // 空值仍是默认根——没有「父目录」时无处可追加。
+  if (!auto) return resolved;
+  if (raw === undefined || raw.trim() === '') return resolved;
+  return `${resolved.replace(/\/+$/, '')}/${BASE_DIR_NAME}`;
+}
+
+/**
+ * 校验并归一安装根（精确模式：填什么就是什么）。
+ *
+ * @param raw - 用户配置值；空串/undefined = 用默认根
+ * @returns 归一后的安装根：绝对路径以 `/` 开头，相对路径无首尾斜杠
+ * @throws Error 形态非法
+ */
+function resolveInstallRootExact(raw?: string): string {
+  const trimmed = (raw ?? '').trim();
+  if (trimmed === '') return BASE_DIR_NAME;
+  if (/^[A-Za-z]:/.test(trimmed)) {
+    throw new Error(
+      `安装根看起来被 Git Bash（MSYS）改写成了 Windows 路径：${trimmed}\n`
+        + '绝对路径请写成 //data/rt（双斜杠，MSYS 不转换），或先设 MSYS_NO_PATHCONV=1；'
+        + '相对家目录的路径直接写 data/rt 即可',
+    );
+  }
+  if (trimmed.startsWith('~')) {
+    throw new Error(`安装根不要带 ~：家目录由远端 \"$HOME\" 展开，写相对路径或绝对路径即可，实际为 ${trimmed}`);
+  }
+  if (trimmed.includes('\\')) {
+    throw new Error(`安装根含反斜杠：${trimmed}。远端一定是 POSIX，路径请用 / 分隔`);
+  }
+  // MSYS 对 `//x` 不做转换，与 remote-cwd 的归一保持一致：折叠成单斜杠
+  const collapsed = trimmed.startsWith('//') ? trimmed.slice(1) : trimmed;
+  const absolute = collapsed.startsWith('/');
+  const body = absolute ? collapsed.replace(/^\/+/, '') : collapsed.replace(/^\.\//, '');
+  const normalized = body.replace(/\/+$/, '');
+  if (normalized === '') {
+    throw new Error(`安装根不能是根目录：${trimmed}。请指向一个专门目录，例如 /data/dsh-remote-explorer`);
+  }
+  const segments = normalized.split('/');
+  for (const segment of segments) {
+    if (segment === '.' || segment === '..') {
+      throw new Error(`安装根不能含 . 或 .. 段，实际为 ${trimmed}`);
+    }
+    if (!INSTALL_ROOT_SEGMENT.test(segment)) {
+      throw new Error(
+        `安装根每段只能是字母/数字/点/下划线/连字符，实际为 ${trimmed}`,
+      );
+    }
+  }
+  const root = segments.join('/');
+  return absolute ? `/${root}` : root;
+}
+
+/**
+ * 把安装根解析成远端绝对目录。
+ *
+ * @param homeDir - 探测到的远端家目录（相对根用它拼接）
+ * @param installRoot - 安装根：绝对路径或相对家目录
+ * @returns 绝对路径（base / DSH_HOME）
+ */
+export function resolveBasePath(homeDir: string, installRoot: string): string {
+  if (installRoot.startsWith('/')) return installRoot;
+  const home = homeDir.endsWith('/') ? homeDir.slice(0, -1) : homeDir;
+  return `${home}/${installRoot}`;
+}
+
 /**
  * 远端路径集合。
  *
- * 由 {@link createRemotePaths} 基于探测到的家目录构造——不接受相对路径，
- * 因为 `~` 在非交互 shell 下的展开行为不可依赖。
+ * 由 {@link createRemotePaths} 基于探测到的家目录与安装根构造。安装根可以是
+ * 绝对路径（`/data/rt`）或相对家目录的路径（`data/rt`）；`~` 在非交互 shell 下的
+ * 展开行为不可依赖，所以两种写法都由本模块拼成绝对路径，不留给远端 shell 展开。
  */
 export interface RemotePaths {
   /** 根目录绝对路径，如 `/home/user/.dsh-remote-explorer/btsd321`。同时也是 DSH_HOME */
@@ -292,16 +385,17 @@ export interface RemotePaths {
  * 基于远端家目录构造路径集合。
  *
  * @param homeDir - 探测到的远端家目录绝对路径
+ * @param installRoot - 安装根：绝对路径或相对家目录；缺省用 {@link BASE_DIR_NAME}
  * @returns 路径集合
  * @throws Error 家目录不是绝对路径
  */
-export function createRemotePaths(homeDir: string): RemotePaths {
+export function createRemotePaths(homeDir: string, installRoot: string = BASE_DIR_NAME): RemotePaths {
   if (!homeDir.startsWith('/')) {
     throw new Error(`远端家目录必须是绝对路径，实际为 ${homeDir || '(空)'}`);
   }
-  // 去掉可能的尾部斜杠，避免拼出双斜杠
+  // 去尾部斜杠避免双斜杠；绝对安装根（/data/rt）直接用，相对根拼在家目录下
   const home = homeDir.endsWith('/') ? homeDir.slice(0, -1) : homeDir;
-  const base = `${home}/${BASE_DIR_NAME}`;
+  const base = resolveBasePath(home, installRoot);
 
   return {
     base,

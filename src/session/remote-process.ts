@@ -73,6 +73,60 @@ export interface RemoteProcessInfo {
   token: string;
 }
 
+/** runner 脚本的拼装输入 */
+export interface RunnerScriptOptions {
+  /** 会话 pid 文件绝对路径（脚本把自身 pid 写这里） */
+  pidFile: string;
+  /** 会话启动日志绝对路径（dsh 的 stdout/stderr 落这里，也是令牌唯一来源） */
+  logFile: string;
+  /** 已过 `quote()` 的环境变量赋值串（形如 `KEY=value`） */
+  envAssignments: readonly string[];
+  /** 启动命令（`buildStartCommand()` 的结果） */
+  startCommand: string;
+  /** 是否 WSL 传输（WSL 的 stdio 被忽略，输出必须脚本自己重定向） */
+  isWsl: boolean;
+  /** 远端工作目录；空串/缺省 = 不切目录（保持登录目录） */
+  cwd?: string;
+}
+
+/**
+ * 拼装远端 dsh 的 runner 脚本。
+ *
+ * 三步顺序不可换：写 pid → 进远端工作目录 → `exec env ... dsh`。
+ * - **写 pid 必须最先**：`exec` 保留原进程号，所以写进去的就是 dsh 的 pid；
+ *   放到 cd 之后虽然也成立，但 cd 失败时 pid 文件缺失会让「启动后立即退出」
+ *   的诊断少一半信息。
+ * - **cd 失败不静默回落家目录**：把原因写进启动日志并非零退出，轮询会以
+ *   「dsh 启动后立即退出」把这句原因带给用户；静默回落家目录正是本函数要修的
+ *   那个坑（远端目录填了却不生效）。
+ * - **重定向只给 WSL**：SSH 的 detach 命令已经做了 `> logFile 2>&1`，这里再写
+ *   一次会把 dsh 的输出截断成两份。
+ *
+ * @param options - 拼装输入
+ * @returns 可写入 runner 文件的脚本正文（以换行结尾）
+ */
+export function buildRunnerScript(options: RunnerScriptOptions): string {
+  const lines = [
+    '#!/bin/sh',
+    `echo $$ > ${quote(options.pidFile)}`,
+  ];
+
+  // 先进入会话的远端工作目录：dsh 的默认会话目录就是 process.cwd()
+  // （session-controller 的 defaultCwd），不 cd 就永远落在登录目录（家目录）
+  const cwd = options.cwd ?? '';
+  if (cwd.length > 0) {
+    const message = `无法进入远端工作目录 ${cwd}（目录不存在或无权限）`;
+    lines.push(
+      `cd ${quote(cwd)} || { printf '%s\\n' ${quote(message)} >> ${quote(options.logFile)}; exit 1; }`,
+    );
+  }
+
+  const execLine = `exec env ${options.envAssignments.join(' ')} ${options.startCommand}`;
+  lines.push(options.isWsl ? `${execLine} > ${quote(options.logFile)} 2>&1` : execLine);
+  lines.push('');
+  return lines.join('\n');
+}
+
 /**
  * 启动远端 dsh 并等待其就绪。
  *
@@ -96,6 +150,17 @@ export async function startRemoteDsh(
     nodeBinDir: string;
     /** 远端监听端口 */
     port: number;
+    /**
+     * 远端工作目录（POSIX 绝对路径；空串/缺省 = 不切目录，留在登录目录）。
+     *
+     * 必须由远端进程自己 cd 进去，而不是靠上层调用方「记着」这个目录：
+     * dsh 在「创建会话时既没指定 workspace 也没指定 cwd」这条路径上用
+     * `process.cwd()` 当默认会话目录（session-controller 的 `defaultCwd`），
+     * 所以远端 dsh 的进程 cwd 就是远端窗口的默认工作目录。不 cd 的话一律落在
+     * SSH 登录目录（家目录）——插件/命令里填的「远端目录」就只在会话 id 与显示里
+     * 生效，等于形同虚设。
+     */
+    cwd?: string;
     /** patch 文件绝对路径（可选） */
     patchFile?: string;
     /**
@@ -160,21 +225,16 @@ export async function startRemoteDsh(
     // PATH 特殊处理："$PATH" 必须留在引号外由 shell 展开，见 shell-quote 的说明
     `PATH=${quote(options.nodeBinDir)}:"$PATH"`,
   ];
-  // runner 脚本：写 pid → exec 替换为 dsh。
-  // WSL 模式下额外加重定向（spawn 的 stdio 是 ignore，dsh 输出必须自己写到 logFile）
-  const runnerLines = [
-    '#!/bin/sh',
-    `echo $$ > ${quote(pidFile)}`,
-  ];
-  if (isWsl) {
-    // WSL spawn 的 stdio 是 ignore，dsh 的 stdout/stderr 需要显式重定向到 logFile
-    runnerLines.push(`exec env ${envAssignments.join(' ')} ${startCommand} > ${quote(logFile)} 2>&1`);
-  } else {
-    // SSH detach 命令已做了 > logFile 2>&1 重定向，runner 不需要重复
-    runnerLines.push(`exec env ${envAssignments.join(' ')} ${startCommand}`);
-  }
-  runnerLines.push('');
-  const runner = runnerLines.join('\n');
+  // runner 脚本：写 pid → 进远端目录 → exec 替换为 dsh。
+  // 拼接收口在 buildRunnerScript（纯函数，单测直接覆盖脚本文本契约）
+  const runner = buildRunnerScript({
+    pidFile,
+    logFile,
+    envAssignments,
+    startCommand,
+    isWsl,
+    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
+  });
 
   // 1. 写 runner 脚本 + 清理旧文件（同步 exec，快速返回）
   //    顺带建用户级技能目录（`<agentsHome>/skills` = 账号的 ~/.agents/skills）：
