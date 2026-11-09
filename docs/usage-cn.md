@@ -152,7 +152,7 @@ pnpm exec tsx src/cli/bin.ts provision <别名> --cwd //home/user
 
 | 参数 | 说明 |
 |---|---|
-| `--cwd <路径>` | 远端工作目录（参与会话 id 计算） |
+| `--cwd <路径>` | 远端工作目录（参与会话 id 计算；远端 dsh 进程也在该目录下运行） |
 | `--node-version <版本>` | 目标 Node 版本（默认解析 Node 24 最新稳定版） |
 | `--dsh-version <版本>` | 目标 dsh 版本或 dist-tag（默认最大稳定版，无稳定版取最新 rc，alpha 不选；首选装不上时退到次新，最多 3 个；失败回退兜底） |
 | `--refresh-mirrors` | 强制重测镜像延迟 |
@@ -200,7 +200,7 @@ DEEPSEEK_API_KEY=sk-xxx pnpm exec tsx src/cli/bin.ts connect <别名> --cwd //ho
 
 | 参数 | 说明 |
 |---|---|
-| `--cwd <路径>` | 远端工作目录（参与会话 id 计算） |
+| `--cwd <路径>` | 远端工作目录（参与会话 id 计算；远端 dsh 进程也在该目录下运行） |
 | `--local-port <端口>` | 本机监听端口（默认由系统分配） |
 | `--no-open` | 不自动打开浏览器 |
 | `--force-restart` | 即便远端已有可用会话也重新启动 |

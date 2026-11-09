@@ -152,7 +152,7 @@ pnpm exec tsx src/cli/bin.ts provision <alias> --cwd //home/user
 
 | Option | Description |
 |---|---|
-| `--cwd <path>` | Remote working directory (participates in session id computation) |
+| `--cwd <path>` | Remote working directory (participates in session id computation; the remote dsh process runs there too) |
 | `--node-version <ver>` | Target Node version (default: resolve the latest Node 24 stable release) |
 | `--dsh-version <ver>` | Target dsh version or dist-tag (default: highest stable release, falling back to the latest rc when no stable exists; alpha excluded; if the top pick cannot be installed, walks down the candidate chain to the next newest, up to 3 attempts; fallback on failure) |
 | `--refresh-mirrors` | Force re-benchmark mirror latency |
@@ -200,7 +200,7 @@ DEEPSEEK_API_KEY=sk-xxx pnpm exec tsx src/cli/bin.ts connect <alias> --cwd //hom
 
 | Option | Description |
 |---|---|
-| `--cwd <path>` | Remote working directory (participates in session id computation) |
+| `--cwd <path>` | Remote working directory (participates in session id computation; the remote dsh process runs there too) |
 | `--local-port <port>` | Local listening port (default: OS-assigned) |
 | `--no-open` | Do not auto-open the browser |
 | `--force-restart` | Restart remote dsh even if an existing session is available |
