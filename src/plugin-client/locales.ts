@@ -11,7 +11,7 @@ export type RemoteExplorerLocaleKey =
   | 'menuSsh' | 'menuWsl'
   | 'host' | 'hostPlaceholder' | 'refreshHosts'
   | 'hostPickerNoMatch' | 'hostDisconnectExternal'
-  | 'cwd' | 'cwdPlaceholder'
+  | 'cwd' | 'cwdPlaceholder' | 'baseDir' | 'baseDirPlaceholder'
   | 'advanced' | 'localPort' | 'forceRestart' | 'refreshMirrors'
   | 'nodeVersion' | 'dshVersion' | 'privateKey'
   | 'localResourceDownload' | 'localResourceDownloadAuto' | 'localResourceDownloadAlways' | 'localResourceDownloadOff'
@@ -20,6 +20,9 @@ export type RemoteExplorerLocaleKey =
   | 'enterCurrent' | 'openNew' | 'countdown' | 'cancelCountdown'
   | 'connectWindow' | 'openWindow'
   | 'overlayLoading' | 'overlayStopping' | 'overlayStoppingRemote' | 'overlayLeaseFailed' | 'overlayReturnHint'
+  | 'overlaySplit' | 'overlayUnsplit' | 'overlaySplitHint'
+  | 'overlayRestart' | 'overlayRestarting' | 'overlayRestartFailed' | 'overlayOpenInBrowser'
+  | 'restart' | 'openInBrowser'
   | 'intentDisconnect' | 'intentStop' | 'intentExecute' | 'intentCancel'
   | 'sessions' | 'noSessions' | 'disconnect' | 'stopRemote' | 'open' | 'external'
   | 'stateIdle' | 'stateConnecting' | 'stateConnected' | 'stateHeartbeatMissed'
@@ -57,6 +60,8 @@ export const zh: Record<RemoteExplorerLocaleKey, string> = {
   hostDisconnectExternal: '该主机的会话由其他本机进程维持，请在对应进程或 CLI 中断开',
   cwd: '远端目录',
   cwdPlaceholder: '/home/you/project（留空 = 远端家目录）',
+  baseDir: '安装根（相对家目录）',
+  baseDirPlaceholder: '.dsh-remote-explorer/btsd321（留空 = 默认根；改根会重新引导一套运行时）',
   advanced: '高级选项',
   localPort: '本机端口（0 = 自动分配）',
   forceRestart: '强制重启远端 dsh',
@@ -85,6 +90,15 @@ export const zh: Record<RemoteExplorerLocaleKey, string> = {
   overlayStoppingRemote: '正在停止远端 dsh…',
   overlayLeaseFailed: '打开远程桌面失败',
   overlayReturnHint: '按 Esc 返回管理页',
+  overlaySplit: '分屏',
+  overlayUnsplit: '整窗',
+  overlaySplitHint: '拖动分界调整左右宽度（分屏时左边留出本机界面）',
+  overlayRestart: '重启远端',
+  overlayRestarting: '正在重启远端 dsh（会话与窗口都保留）…',
+  overlayRestartFailed: '重启远端 dsh 失败',
+  overlayOpenInBrowser: '浏览器打开',
+  restart: '重启',
+  openInBrowser: '浏览器',
   intentDisconnect: '远端窗口请求关闭此远程连接（本机隧道与会话登记将解除，远端 dsh 保留）',
   intentStop: '远端窗口请求停止远端 dsh 并关闭此远程连接',
   intentExecute: '执行',
@@ -179,6 +193,8 @@ export const en: Record<RemoteExplorerLocaleKey, string> = {
   hostDisconnectExternal: 'The sessions of this host are maintained by other local processes; disconnect from that process or the CLI',
   cwd: 'Remote directory',
   cwdPlaceholder: '/home/you/project (empty = remote home)',
+  baseDir: 'Install root (relative to home)',
+  baseDirPlaceholder: '.dsh-remote-explorer/btsd321 (empty = default; a new root provisions a fresh runtime)',
   advanced: 'Advanced',
   localPort: 'Local port (0 = auto)',
   forceRestart: 'Force-restart remote dsh',
@@ -207,6 +223,15 @@ export const en: Record<RemoteExplorerLocaleKey, string> = {
   overlayStoppingRemote: 'Stopping remote dsh…',
   overlayLeaseFailed: 'Failed to open remote desktop',
   overlayReturnHint: 'Press Esc to return to the manager',
+  overlaySplit: 'Split',
+  overlayUnsplit: 'Full',
+  overlaySplitHint: 'Drag the divider to resize (split keeps the local UI visible on the left)',
+  overlayRestart: 'Restart remote',
+  overlayRestarting: 'Restarting remote dsh (session and window are kept)…',
+  overlayRestartFailed: 'Failed to restart remote dsh',
+  overlayOpenInBrowser: 'Open in browser',
+  restart: 'Restart',
+  openInBrowser: 'Browser',
   intentDisconnect: 'The remote window asked to close this remote connection (local tunnel and session registration go away; remote dsh stays)',
   intentStop: 'The remote window asked to stop the remote dsh and close this remote connection',
   intentExecute: 'Execute',

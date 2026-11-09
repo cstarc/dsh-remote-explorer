@@ -39,6 +39,11 @@ export interface KillCommandOptions {
   privateKey?: string;
   /** 固定密码（--password）：显式走密码认证 */
   password?: string;
+  /**
+   * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
+   * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
+   */
+  baseDirName?: string;
 }
 
 /**
@@ -64,8 +69,8 @@ export async function runKill(options: KillCommandOptions): Promise<number> {
     progress.done();
 
     progress.start('探测远端环境');
-    const probe = await probeRemote(transport);
-    const paths = createRemotePaths(probe.homeDir);
+    const probe = await probeRemote(transport, undefined, false, options.baseDirName);
+    const paths = createRemotePaths(probe.homeDir, options.baseDirName);
     progress.done();
 
     // 确定要停哪些会话：--all 时扫远端会话目录，否则只停指定的那一个。

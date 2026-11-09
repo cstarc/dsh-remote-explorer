@@ -59,6 +59,61 @@ const LOCAL_HOST_TAG = createHash('sha1').update(hostname()).digest('hex').slice
  */
 export const BASE_DIR_NAME = '.dsh-remote-explorer/btsd321';
 
+/** 安装根名字允许的字符：多段相对路径，段内不含空白/通配/引号，杜绝 shell 注入面 */
+const BASE_DIR_NAME_PATTERN = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+
+/**
+ * 校验并归一用户配置的安装根（相对远端家目录的多段路径）。
+ *
+ * 允许改根是为了这几种真实场景：家目录是只读/配额很小（`~/.dsh-remote-explorer`
+ * 装不下 node_modules）、同一账号要并行维护两套独立运行时（升级验证）、
+ * 以及把整套运行时挪到数据盘（如 `/home/u` 家目录在系统盘，数据盘挂在
+ * `data/` 下也只要写 `data/dsh-remote-explorer`）。
+ *
+ * 拒绝的形态及原因：
+ * - 绝对路径 / 以 `~` 开头：家目录由远端 `"$HOME"` 展开，本机给绝对路径会让
+ *   「换个家目录」这件事在不同账号间无法复用
+ * - `..` 段：越出家用范围等于往别人的目录里写
+ * - 反斜杠与空白：远端一定是 POSIX，反斜杠是误把 Windows 路径当远端路径
+ * - `$`、引号、通配符：这些名字会拼进远端 shell 命令，只允许安全字符集
+ *
+ * @param raw - 用户配置值；空串/undefined = 用默认根
+ * @returns 归一后的相对路径（无首尾斜杠）
+ * @throws Error 形态非法
+ */
+export function resolveBaseDirName(raw?: string): string {
+  const trimmed = (raw ?? '').trim();
+  if (trimmed === '') return BASE_DIR_NAME;
+  if (/^[A-Za-z]:/.test(trimmed)) {
+    throw new Error(
+      `安装根看起来被 Git Bash（MSYS）改写成了 Windows 路径：${trimmed}\n`
+        + '安装根本来就相对远端家目录，直接写 data/rt 这种形式（不带前导斜杠）即可；'
+        + '确实要传前导斜杠的形态时用 MSYS_NO_PATHCONV=1',
+    );
+  }
+  if (trimmed.startsWith('/')) {
+    throw new Error(
+      `安装根必须是相对家目录的路径（不以 / 开头），实际为 ${trimmed}；直接写 data/rt 即可`,
+    );
+  }
+  if (trimmed.startsWith('~')) {
+    throw new Error(`安装根不要带 ~，它本身就相对家目录，实际为 ${trimmed}`);
+  }
+  if (trimmed.includes('\\')) {
+    throw new Error(`安装根含反斜杠：${trimmed}。远端一定是 POSIX，路径请用 / 分隔`);
+  }
+  const normalized = trimmed.replace(/\/+$/, '').replace(/^\.\//, '');
+  if (!BASE_DIR_NAME_PATTERN.test(normalized)) {
+    throw new Error(
+      `安装根只能是相对家目录的路径，每段限字母/数字/点/下划线/连字符，实际为 ${trimmed}`,
+    );
+  }
+  if (normalized.split('/').some(segment => segment === '.' || segment === '..')) {
+    throw new Error(`安装根不能含 . 或 .. 段，实际为 ${trimmed}`);
+  }
+  return normalized;
+}
+
 /**
  * 远端路径集合。
  *
@@ -292,16 +347,17 @@ export interface RemotePaths {
  * 基于远端家目录构造路径集合。
  *
  * @param homeDir - 探测到的远端家目录绝对路径
+ * @param baseDirName - 安装根（相对家目录的多段路径）；缺省用 {@link BASE_DIR_NAME}
  * @returns 路径集合
  * @throws Error 家目录不是绝对路径
  */
-export function createRemotePaths(homeDir: string): RemotePaths {
+export function createRemotePaths(homeDir: string, baseDirName: string = BASE_DIR_NAME): RemotePaths {
   if (!homeDir.startsWith('/')) {
     throw new Error(`远端家目录必须是绝对路径，实际为 ${homeDir || '(空)'}`);
   }
   // 去掉可能的尾部斜杠，避免拼出双斜杠
   const home = homeDir.endsWith('/') ? homeDir.slice(0, -1) : homeDir;
-  const base = `${home}/${BASE_DIR_NAME}`;
+  const base = `${home}/${baseDirName}`;
 
   return {
     base,

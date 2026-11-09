@@ -47,6 +47,11 @@ export interface CleanCommandOptions {
   privateKey?: string;
   /** 固定密码（--password）：显式走密码认证 */
   password?: string;
+  /**
+   * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
+   * 改根等于换一套独立运行时与 DSH_HOME，需要重新引导。
+   */
+  baseDirName?: string;
 }
 
 /** 清理结果 */
@@ -88,8 +93,8 @@ export async function runClean(options: CleanCommandOptions): Promise<number> {
     progress.done();
 
     progress.start('探测远端环境');
-    const probe = await probeRemote(transport);
-    const paths = createRemotePaths(probe.homeDir);
+    const probe = await probeRemote(transport, undefined, false, options.baseDirName);
+    const paths = createRemotePaths(probe.homeDir, options.baseDirName);
     progress.done();
 
     progress.start('收集保护清单与陈旧资源');

@@ -152,6 +152,8 @@ export interface ConnectBody {
   hostAlias: string;
   /** 远端目录；空串 = 家目录 */
   cwd?: string;
+  /** 安装根（相对远端家目录；空串 = 内置默认根） */
+  baseDir?: string;
   /** SSH 密码（仅内存语义，见面板警示文案） */
   password?: string;
   /** 私钥路径 */
@@ -195,6 +197,22 @@ export async function postConnect(body: ConnectBody): Promise<PanelSession> {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
+  });
+  return result.session;
+}
+
+/**
+ * 重启某会话的远端 dsh（本机隧道保留，返回的 url 带新令牌）。
+ *
+ * @param target - 会话 id 或主机别名
+ * @returns 重启后的面板会话快照
+ * @throws ApiError not_found / still_connecting / bad_usage
+ */
+export async function postRestart(target: string): Promise<PanelSession> {
+  const result = await request<{ ok: boolean; session: PanelSession }>('/restart', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ target }),
   });
   return result.session;
 }

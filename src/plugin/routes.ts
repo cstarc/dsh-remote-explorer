@@ -315,6 +315,7 @@ function buildRoutes(supervisor: SessionSupervisor): RouteDef[] {
             ...(distroName !== undefined ? { distroName } : {}),
             ...(stringField(body, 'wslUser') !== undefined ? { wslUser: stringField(body, 'wslUser') } : {}),
             ...(stringField(body, 'cwd') !== undefined ? { cwd: stringField(body, 'cwd') } : {}),
+            ...(stringField(body, 'baseDir') !== undefined ? { baseDir: stringField(body, 'baseDir') } : {}),
             ...(stringField(body, 'password') !== undefined ? { password: stringField(body, 'password') } : {}),
             ...(stringField(body, 'privateKey') !== undefined ? { privateKey: stringField(body, 'privateKey') } : {}),
             ...(numberField(body, 'localPort') !== undefined ? { localPort: numberField(body, 'localPort') } : {}),
@@ -338,6 +339,23 @@ function buildRoutes(supervisor: SessionSupervisor): RouteDef[] {
             ...(stringField(body, 'managerUrl') !== undefined ? { managerUrl: stringField(body, 'managerUrl') } : {}),
           };
           const snapshot = supervisor.startConnect(connectRequest);
+          return Response.json({ ok: true, session: toPanelSession(snapshot) });
+        } catch (error) {
+          return supervisorError(error);
+        }
+      },
+    },
+    {
+      path: `${ROUTE_PREFIX}/restart`,
+      methods: ['POST'],
+      fetch: async (request) => {
+        try {
+          const body = await readJsonBody(request);
+          const target = stringField(body, 'target');
+          if (target === undefined) {
+            return Response.json({ code: 'bad_usage', message: '缺少 target 字段' }, { status: 400 });
+          }
+          const snapshot = await supervisor.restart(target);
           return Response.json({ ok: true, session: toPanelSession(snapshot) });
         } catch (error) {
           return supervisorError(error);

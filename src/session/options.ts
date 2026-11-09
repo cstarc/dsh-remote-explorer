@@ -29,6 +29,13 @@ export interface OpenSessionOptions {
   hostAlias: string;
   /** 远端工作目录；参与会话 id 计算 */
   remoteCwd: string;
+  /**
+   * 安装根（相对远端家目录的多段路径）；缺省 `~/.dsh-remote-explorer/btsd321`。
+   *
+   * 与 `remoteCwd` 是两件事：安装根决定 Node/dsh/插件仓库/会话材料落在哪，
+   * 工作目录决定远端 dsh 进程的 cwd 与远端窗口的默认目录。
+   */
+  baseDirName?: string;
   /** 传输类型；默认 'ssh'（向后兼容） */
   transportType?: TransportType;
   /** WSL 发行版名称（transportType='wsl' 时必需） */

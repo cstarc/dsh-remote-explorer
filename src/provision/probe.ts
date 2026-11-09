@@ -94,10 +94,13 @@ const REQUIRED_BYTES = 1_500_000_000;
  * 探测远端环境。
  *
  * 根目录由远端 shell 展开 `"$HOME"` 得出，不由调用方传入——探测本身就是
- * 为了拿到家目录，此时本机还不知道它的绝对路径。
+ * 为了拿到家目录，此时本机还不知道它的绝对路径。安装根的名字（相对家目录）
+ * 只有调用方知道，故作为参数传入。
  *
  * @param transport - 已连接的传输
  * @param signal - 取消信号
+ * @param offline - 严格离线模式（不查在线版本、不下载）
+ * @param baseDirName - 安装根（相对家目录的多段路径）；缺省用 {@link BASE_DIR_NAME}
  * @returns 探测结果
  * @throws RemoteError('REMOTE_TOOL_MISSING') 缺少下载或解包所需的基础命令
  */
@@ -105,12 +108,13 @@ export async function probeRemote(
   transport: RemoteTransport,
   signal?: AbortSignal,
   offline = false,
+  baseDirName: string = BASE_DIR_NAME,
 ): Promise<ProbeResult> {
   const platform = transport.platform;
 
   // 根目录名单独转义后拼在 "$HOME" 之后——不能把 $HOME 一起塞进 quote()，
   // 单引号会阻止 shell 展开，glob 就永远匹配不到已装的运行时
-  const base = `"$HOME"/${quote(BASE_DIR_NAME)}`;
+  const base = `"$HOME"/${quote(baseDirName)}`;
 
   // 一次 exec 拿齐所有信息，减少往返
   const script = [
@@ -156,6 +160,7 @@ export async function probeRemote(
   const { nodes: managedNodes, dsh: managedDsh, dshPresentButUnusable } = parseInstalledRuntimes(
     result.stdout,
     homeDir,
+    baseDirName,
   );
 
   const availRaw = parseFirst(result.stdout, 'AVAIL=');
@@ -271,11 +276,13 @@ export function assertNodeStable(
  *
  * @param output - 探测脚本的 stdout
  * @param homeDir - 远端家目录绝对路径（推断 dsh 入口路径用）
+ * @param baseDirName - 安装根（相对家目录的多段路径）；缺省用 {@link BASE_DIR_NAME}
  * @returns 已装 Node 列表、可用 dsh 列表、以及「dsh 存在但不可用」标记
  */
 export function parseInstalledRuntimes(
   output: string,
   homeDir: string,
+  baseDirName: string = BASE_DIR_NAME,
 ): { nodes: InstalledRuntime[]; dsh: InstalledRuntime[]; dshPresentButUnusable: boolean } {
   const nodes: InstalledRuntime[] = [];
   for (const line of collect(output, 'NODE=')) {
@@ -287,7 +294,7 @@ export function parseInstalledRuntimes(
   const dshVersion = parseFirst(output, 'DSH=');
   if (dshVersion !== undefined && dshVersion !== '') {
     dsh.push({
-      path: `${homeDir}/${BASE_DIR_NAME}/node_modules/.bin/dsh`,
+      path: `${homeDir}/${baseDirName}/node_modules/.bin/dsh`,
       version: dshVersion,
     });
   }

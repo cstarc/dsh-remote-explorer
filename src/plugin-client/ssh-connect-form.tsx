@@ -39,6 +39,9 @@ import { DESKTOP } from './constants.js';
 /** localStorage 里「上次远端目录」的键前缀（按主机别名记忆） */
 const LAST_CWD_KEY_PREFIX = 'dsh-remote-explorer:lastCwd:';
 
+/** localStorage 里「上次安装根」的键（全局记忆：同一账号下换主机通常仍用同一个根） */
+const BASE_DIR_KEY = 'dsh-remote-explorer:baseDir';
+
 /** localStorage 里「上次 dsh 版本」的键（SSH 域，不按主机区分） */
 const DSH_VERSION_KEY = 'dsh-remote-explorer:dshVersion:ssh';
 
@@ -79,6 +82,10 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
   // ---- 连接表单状态 ----
   const [host, setHost] = React.useState('');
   const [cwd, setCwd] = React.useState('');
+  // 安装根：全局记忆（不像 cwd 按主机记——同一个远端账号通常只用一个根）
+  const [baseDir, setBaseDir] = React.useState(() => {
+    try { return localStorage.getItem(BASE_DIR_KEY) ?? ''; } catch { return ''; }
+  });
   const [password, setPassword] = React.useState('');
   const [privateKey, setPrivateKey] = React.useState('');
   const [localPort, setLocalPort] = React.useState('');
@@ -183,6 +190,7 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
       const session = await postConnect({
         hostAlias: host.trim(),
         ...(cwd.trim() !== '' ? { cwd: cwd.trim() } : {}),
+        ...(baseDir.trim() !== '' ? { baseDir: baseDir.trim() } : {}),
         ...(password !== '' ? { password } : {}),
         ...(privateKey.trim() !== '' ? { privateKey: privateKey.trim() } : {}),
         ...(Number.isFinite(port) && port > 0 ? { localPort: port } : {}),
@@ -206,6 +214,7 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
       });
       try {
         localStorage.setItem(`${LAST_CWD_KEY_PREFIX}${host.trim()}`, cwd.trim());
+        localStorage.setItem(BASE_DIR_KEY, baseDir.trim());
         // dsh 版本按传输形态（SSH）记忆，下次连接时恢复上次选择
         localStorage.setItem(DSH_VERSION_KEY, dshVersion.trim());
         // Node 版本同纪律（SSH 域独立记忆）
@@ -246,6 +255,11 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
           <span style={{ fontSize: 12, opacity: 0.75 }}>{t('cwd')}</span>
           <input value={cwd} placeholder={t('cwdPlaceholder')} style={inputStyle}
             onChange={event => setCwd(event.target.value)} />
+        </label>
+        <label style={{ display: 'flex', flexDirection: 'column', gap: 2, flex: '1 1 240px' }}>
+          <span style={{ fontSize: 12, opacity: 0.75 }}>{t('baseDir')}</span>
+          <input value={baseDir} placeholder={t('baseDirPlaceholder')} style={inputStyle}
+            onChange={event => setBaseDir(event.target.value)} />
         </label>
       </div>
 

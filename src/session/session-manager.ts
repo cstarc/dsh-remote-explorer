@@ -361,6 +361,61 @@ export class RemoteSession {
     this.apply({ type: 'disconnect' });
   }
 
+  /**
+   * 重启远端 dsh 进程，会话其余部分保持不动。
+   *
+   * 三个典型用途：远端装/改插件后让新代码生效、远端进程卡死、以及新装了一版
+   * dsh 想立刻用上。与「断开再连接」的区别是本机端口、反向隧道、凭据代理与
+   * sessionId 全部保留——只有远端 pid、远端端口与访问令牌会变，所以调用方拿到
+   * 新 url 重新导航即可（浏览器标签 / 桌面浮层都只需换地址，不必重建会话）。
+   *
+   * 心跳在过程中暂停：停进程的窗口里 pid 与端口都会失效，不暂停会被判成
+   * 「心跳失败」而触发一次多余的重连。
+   *
+   * @returns 新的访问地址（含新令牌）
+   * @throws RemoteError('CONNECT_FAILED') 会话已关闭或重启失败
+   */
+  async restartRemote(): Promise<string> {
+    if (this.closed) {
+      throw new RemoteError('CONNECT_FAILED', '会话已关闭，无法重启远端 dsh');
+    }
+    this.heartbeat?.stop();
+    try {
+      // 1. 停旧进程（pid 优先、端口兜底；绝不用 pkill -f，见 remote-process 文件头）
+      await stopRemoteDsh(
+        { transport: this.transport, paths: this.provisioned.paths },
+        { sessionId: this.sessionId, port: this.process.port },
+      );
+      // 2. 远端端口优先复用刚释放的那个：端口稳定，远端侧的既有引用不会漂移。
+      //    申请失败（探测不到空闲端口）就沿用旧端口，launch 内部还有一次换端口重试
+      const exclude = this.credential ? [this.credential.reversePort] : [];
+      const [allocated] = await allocateRemotePorts(this.transport, 1, { exclude });
+      const nextPort = allocated ?? this.process.port;
+      // 3. 用同一份引导结果与凭据材料重新拉起（patch 与 credentials 已在盘上）
+      this.process = await launch(
+        this.transport,
+        this.provisioned,
+        this.sessionId,
+        {
+          remoteCwd: this.options.remoteCwd,
+          ...(this.options.transportType !== undefined
+            ? { transportType: this.options.transportType }
+            : {}),
+          ...(this.options.extraEnv !== undefined ? { extraEnv: this.options.extraEnv } : {}),
+          ...(this.options.proxy !== undefined ? { proxy: this.options.proxy } : {}),
+          ...(this.options.wslUser !== undefined ? { wslUser: this.options.wslUser } : {}),
+        },
+        nextPort,
+        this.credential,
+      );
+      this.register();
+      log.info(`远端 dsh 已重启: pid=${this.process.pid}, remotePort=${this.process.port}`);
+      return this.url;
+    } finally {
+      if (!this.closed) this.startHeartbeat();
+    }
+  }
+
   /** 登记到本机会话表 */
   private register(): void {
     upsertSession({
