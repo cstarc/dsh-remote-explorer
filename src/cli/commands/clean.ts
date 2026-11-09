@@ -151,6 +151,10 @@ async function collectAndClean(
   const collect = [
     // 用解析后的绝对 base（安装根可能是 /data/rt 这种绝对路径，不能再假设在家目录下）
     'for s in $(find ' + quote(baseDir) + '/sessions -mindepth 1 -maxdepth 1 -type d 2>/dev/null); do',
+    // 只认本工具的会话目录：DSH_HOME == base，所以 <base>/sessions 下还住着
+    // dsh 自己的工作区会话目录（'--<workspace>--'/session-*，对话历史在里面）。
+    // 没有 .runtime 就不是本工具建的，绝不能当陈旧会话删。
+    '  [ -d "$s/.runtime" ] || continue',
     '  p=$(cat "$s/.runtime/pid" 2>/dev/null)',
     '  if [ -n "$p" ] && kill -0 "$p" 2>/dev/null; then',
     '    cat "$s/.runtime/start.sh" 2>/dev/null',
