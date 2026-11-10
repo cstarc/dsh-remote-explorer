@@ -338,31 +338,32 @@ export function SshConnectForm(props: SshConnectFormProps): ReactNode {
       </label>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* 多视图下「已连接主机」不再顶掉连接按钮：换安装根再开一套、或多开
+            窗口都是合法操作。断开降级为辅助按钮，只影响本面板维持的视图。 */}
         {host.trim() !== '' && connectedHostAliases.has(host.trim())
           ? (
-            // 选中已连接主机：按钮组整体切换为「断开」（含连接中与外部视图的
-            // 主机都算已连接；断开逻辑在面板层——需要会话表数据）
-            <button type="button" style={{ ...buttonStyle, fontWeight: 600 }}
+            <button type="button" style={{ ...buttonStyle }}
               disabled={busy}
               onClick={() => { void onDisconnectHost(host.trim()); }}>
               {busy ? t('connecting') : t('disconnect')}
             </button>
           )
-          : DESKTOP
-            ? (
-              // 桌面端单入口：就绪后开整窗浮动桌面（桌面壳无跨 origin 导航能力）
+          : null}
+        {DESKTOP
+          ? (
+            // 桌面端单入口：就绪后开整窗浮动桌面
+            <button type="button" style={{ ...buttonStyle, fontWeight: 600 }}
+              disabled={busy || host.trim() === ''}
+              onClick={() => { void onConnect('window'); }}>
+              {busy ? t('connecting') : t('connectWindow')}
+            </button>
+          )
+          : (
+            // 浏览器端双入口：当前标签 = 同标签切入；新标签 = 本页留守
+            <>
               <button type="button" style={{ ...buttonStyle, fontWeight: 600 }}
                 disabled={busy || host.trim() === ''}
-                onClick={() => { void onConnect('window'); }}>
-                {busy ? t('connecting') : t('connectWindow')}
-              </button>
-            )
-            : (
-              // 浏览器端双入口（VS Code 语义）：当前标签 = 就绪后同标签切入；新标签 = 本页留守管理
-              <>
-                <button type="button" style={{ ...buttonStyle, fontWeight: 600 }}
-                  disabled={busy || host.trim() === ''}
-                  onClick={() => { void onConnect('current'); }}>
+                onClick={() => { void onConnect('current'); }}>
                   {busy ? t('connecting') : t('connectCurrent')}
                 </button>
                 <button type="button" style={buttonStyle}
