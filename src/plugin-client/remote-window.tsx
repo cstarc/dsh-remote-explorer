@@ -172,16 +172,27 @@ export interface RemoteWindowTarget {
   url: string;
   /** 主机别名（仅作诊断/日志，不再渲染成顶栏 pill） */
   hostAlias: string;
+  /** 窗口 key：视图 id 优先，缺省用会话 id（同会话多窗口各开一个） */
+  viewKey?: string;
 }
 
-/** 当前浮层目标；null = 未开 */
-let currentTarget: RemoteWindowTarget | null = null;
-
+/**
+ * 已打开的浮层窗口：key = viewKey（视图 id，缺省 sessionId）。
+ *
+ * 多开语义：同会话多个视图各开各的窗口；不同会话也各开各的。窗口堆叠，
+ * 点击置顶，Esc 关最近打开的一个。
+ */
+const windows = new Map<string, RemoteWindowTarget>();
+/** 发布给 useSyncExternalStore 的不可变快照 */
+let snapshot = new Map(windows);
 /** 订阅者集合（面板按钮与浮层组件分属不同 slot，经本 store 通信） */
 const listeners = new Set<() => void>();
+/** 窗口 z-index 计数：点击置顶 */
+let zTop = 2_147_483_000;
 
 /** 通知全部订阅者 */
 function publish(): void {
+  snapshot = new Map(windows);
   for (const listener of [...listeners]) listener();
 }
 
@@ -192,41 +203,56 @@ function subscribe(listener: () => void): () => void {
 }
 
 /** store 快照（引用稳定，未变时返回同一对象） */
-function getTarget(): RemoteWindowTarget | null {
-  return currentTarget;
+function getWindows(): Map<string, RemoteWindowTarget> {
+  return snapshot;
+}
+
+/** 窗口 key：视图 id 优先，缺省用会话 id（旧调用方兼容） */
+function keyOf(target: RemoteWindowTarget): string {
+  return target.viewKey ?? target.sessionId;
 }
 
 /**
  * 打开整窗浮层（桌面端调用）。
  *
- * @param next - 目标会话；重复打开同一会话幂等，换会话则整体替换
+ * @param next - 目标会话；同 key 幂等，不同 key 各开各的窗口
  */
 export function openRemoteWindow(next: RemoteWindowTarget): void {
-  log.info('打开远程窗口', { sessionId: next.sessionId, hostAlias: next.hostAlias });
-  currentTarget = next;
+  log.info('打开远程窗口', { sessionId: next.sessionId, hostAlias: next.hostAlias, viewKey: keyOf(next) });
+  windows.set(keyOf(next), next);
   publish();
 }
 
 /**
- * 会话重启后刷新已打开的浮层目标。
+ * 会话重启后刷新已打开的浮层窗口。
  *
- * 只有当前正显示同一会话时才更新——否则会把用户没打开的窗口硬拉起来。
- * 目标换 url 会触发浮层 effect 重建 webview（令牌随重启更换，旧地址会 401）。
+ * 同一会话可能开了多个视图窗口：全部换成新地址（令牌随重启更换，旧地址会
+ * 401）。没打开的会话不会硬拉起来。
  *
  * @param next - 新目标（sessionId 用于判同）
  */
 export function refreshRemoteWindow(next: RemoteWindowTarget): void {
-  if (currentTarget === null || currentTarget.sessionId !== next.sessionId) return;
-  currentTarget = next;
-  publish();
+  let changed = false;
+  for (const [key, win] of windows) {
+    if (win.sessionId !== next.sessionId) continue;
+    windows.set(key, { ...win, url: next.url });
+    changed = true;
+  }
+  if (changed) publish();
 }
 
-/** 收起浮层（lease 由组件 effect 清理时 release；远端会话保留） */
-export function closeRemoteWindow(): void {
-  if (currentTarget !== null) {
-    currentTarget = null;
+/** 收起一个窗口（lease 由组件 effect 清理时 release；远端会话保留） */
+export function closeRemoteWindow(viewKey: string): void {
+  if (windows.has(viewKey)) {
+    windows.delete(viewKey);
     publish();
   }
+}
+
+/** Esc 兜底：关闭最近打开的一个窗口 */
+export function closeTopWindow(): void {
+  const keys = [...windows.keys()];
+  if (keys.length > 0) closeRemoteWindow(keys[keys.length - 1]!);
 }
 
 /** 浮层 props（locale 面由 slots 框架注入） */
@@ -249,12 +275,13 @@ function messageOf(error: unknown): string {
 export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode {
   const { t } = props;
 
-  // 诊断标记：确认组件是否被 React 挂载（绕过 console 限制）
-  const target = React.useSyncExternalStore(subscribe, getTarget);
+  const windows = React.useSyncExternalStore(subscribe, getWindows);
+  /** 每个窗口的清理函数：发布只挂载/卸载增量，已开窗口的 webview 不重建 */
+  const cleanups = React.useRef(new Map<string, () => void>());
 
-  React.useEffect(() => {
-    if (target === null) return;
-    log.info('远程窗口浮层启动', { sessionId: target.sessionId });
+  const mountWindow = (target: RemoteWindowTarget): (() => void) => {
+    const viewKey = keyOf(target);
+    log.info('远程窗口浮层启动', { sessionId: target.sessionId, viewKey });
     const bridge = desktopBrowser();
     let disposed = false;
     let lease: string | undefined;
@@ -576,7 +603,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     const runStop = (sessionId: string, stop: boolean): void => {
       showStatus(stop ? t('overlayStoppingRemote') : t('overlayStopping'));
       void postDisconnect(sessionId, stop)
-        .then(() => { closeRemoteWindow(); })
+        .then(() => { closeRemoteWindow(viewKey); })
         .catch((error: unknown) => {
           if (!disposed) showStatus(`${messageOf(error)}\n${t('overlayReturnHint')}`);
         });
@@ -630,15 +657,14 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
         return true;
       }
       // 裸 origin（来自 handoff「返回本地管理页」的 window.open）= 回退主窗口
-      closeRemoteWindow();
+      closeRemoteWindow(viewKey);
       return true;
     };
 
-    // Esc 兜底（仅宿主 document 有焦点时生效；webview 夺焦后收不到，以 handoff pill 为准）
-    const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') closeRemoteWindow();
-    };
-    window.addEventListener('keydown', onKeyDown);
+    // 点击窗口任意处置顶（多窗口堆叠时盖住其它窗口）
+    container.addEventListener('mousedown', () => {
+      container.style.zIndex = String(++zTop);
+    });
 
     if (bridge === undefined) {
       // 防御性兜底：浏览器端不会调 openRemoteWindow，这里只保证不崩、可 Esc 退出
@@ -647,7 +673,7 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
     } else {
       // 1. 预约 lease（workspace id 按会话隔离 → 远端 cookie 各会话独立）
       log.info('开始 acquire lease...');
-      void bridge.acquire(`dsh-remote-explorer:${target.sessionId}`)
+      void bridge.acquire(`dsh-remote-explorer:${viewKey}`)
         .then((result) => {
           log.info('lease 获取成功', { lease: result.lease, partition: result.partition });
           if (disposed) { void bridge.release(result.lease).catch(() => {}); return; }
@@ -695,7 +721,6 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
 
     return () => {
       disposed = true;
-      window.removeEventListener('keydown', onKeyDown);
       endDrag?.();
       endToolbarDrag?.();
       resizeObserver?.disconnect();
@@ -713,7 +738,26 @@ export function RemoteWindowOverlay(props: RemoteWindowOverlayProps): ReactNode 
       }
       container.remove();
     };
-  }, [target, t]);
+  };
+
+  // 挂载/卸载增量：发布时只处理新增与移除的 key，已开窗口原样保留
+  React.useEffect(() => {
+    for (const win of windows.values()) {
+      if (!cleanups.current.has(keyOf(win))) cleanups.current.set(keyOf(win), mountWindow(win));
+    }
+    for (const [key, cleanup] of cleanups.current) {
+      if (!windows.has(key)) { cleanup(); cleanups.current.delete(key); }
+    }
+  }, [windows, t]);
+
+  // Esc 关闭最近打开的窗口（仅宿主 document 有焦点时生效；webview 夺焦后以 handoff pill 为准）
+  React.useEffect(() => {
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') closeTopWindow();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return null;
 }

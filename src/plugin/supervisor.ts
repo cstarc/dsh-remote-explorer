@@ -82,6 +82,8 @@ export interface LogEntry {
 export interface SessionSnapshot {
   /** 会话 id（远端身份，主机别名+目录算出） */
   sessionId: string;
+  /** 本视图 id：同会话可并列多个本机视图（各自隧道/窗口），每视图唯一 */
+  viewId: string;
   /** 主机别名或 user@host[:port] */
   hostAlias: string;
   /** 远端工作目录；空串 = 远端家目录 */
@@ -238,6 +240,8 @@ interface SupervisedSession {
   hostAlias: string;
   /** 归一化后的远端目录 */
   remoteCwd: string;
+  /** 本视图 id（Map 的 key，同会话多视图时唯一） */
+  viewId: string;
   /** 非默认安装根（绝对路径或相对家目录）；undefined = 内置默认根 */
   baseDir: string | undefined;
   /** 传输类型 */
@@ -268,7 +272,10 @@ interface SupervisedSession {
  * 进度经日志缓冲暴露，消费面轮询。
  */
 export class SessionSupervisor {
+  /** key = viewId（同会话多视图）；value = 视图登记项 */
   private readonly sessions = new Map<string, SupervisedSession>();
+  /** 视图序号：viewId 追加段 */
+  private viewSeq = 0;
 
   /**
    * @param defaults - 插件配置提供的默认值
@@ -306,20 +313,21 @@ export class SessionSupervisor {
     }
     const sessionId = computeSessionId(request.hostAlias, remoteCwd);
 
-    // 2. 去重：同会话正在连接或已连接时拒绝（复用既有会话请加 forceRestart
-    //    前先断开，或直接打开已有会话的 url）
-    const existing = this.sessions.get(sessionId);
+    // 2. 多视图：同一 (主机, 目录) 允许并列多个本机视图——各自独立的本机隧道
+    //    与远程窗口（多窗口场景），或不同安装根各起一套运行时。视图们默认复用
+    //    同一个远端进程（探测复用）；「重启/断开+停止远端」会波及同会话的其他
+    //    视图，面板按视图行操作即可。
+    const viewId = `${sessionId}#${++this.viewSeq}`;
+    const existing = [...this.sessions.values()].find(record => record.sessionId === sessionId);
     if (existing !== undefined && (existing.connecting || existing.session !== undefined)) {
-      throw new SupervisorError(
-        'already_active',
-        `会话 ${request.hostAlias}:${remoteCwd || '~'} 已在${existing.connecting ? '连接中' : '运行中'}（${sessionId.slice(0, 12)}…）`,
-      );
+      this.push(existing, 'info', `同会话已有一个视图（${existing.viewId}），本次新建独立视图与隧道`);
     }
 
     // 3. 登记 + 后台打开
     const transportType: TransportType = request.transportType ?? 'ssh';
     const record: SupervisedSession = {
       sessionId,
+      viewId,
       hostAlias: request.hostAlias,
       remoteCwd,
       baseDir: installRoot === BASE_DIR_NAME ? undefined : installRoot,
@@ -333,7 +341,7 @@ export class SessionSupervisor {
       startedAt: new Date().toISOString(),
       managerUrl: request.managerUrl,
     };
-    this.sessions.set(sessionId, record);
+    this.sessions.set(viewId, record);
     this.push(record, 'info', `发起连接 ${request.hostAlias} → ${remoteCwd || '远端家目录'}`
       + `${record.baseDir === undefined
         ? ''
@@ -431,6 +439,8 @@ export class SessionSupervisor {
       if (ownIds.has(record.sessionId)) continue;
       external.push({
         sessionId: record.sessionId,
+        // 外部视图没有本机视图 id：用会话 id + 标记，仅展示用
+        viewId: `${record.sessionId}#external`,
         hostAlias: record.hostAlias,
         remoteCwd: record.remoteCwd,
         // 会话表记录不带传输类型字段；WSL 传输的 hostAlias 带 'wsl:' 前缀
@@ -462,7 +472,7 @@ export class SessionSupervisor {
    * @returns 快照；会话不在内存或已断开时 undefined
    */
   snapshotById(sessionId: string): SessionSnapshot | undefined {
-    const record = this.sessions.get(sessionId);
+    const record = this.sessions.get(sessionId) ?? this.looseFind(sessionId);
     if (record === undefined) return undefined;
     // 与 list() 的 own 过滤同一判据，避免两条路径对同一会话呈现不一致
     if (!(record.connecting || record.session !== undefined
@@ -480,7 +490,7 @@ export class SessionSupervisor {
    * @returns 日志条目；会话不存在时 undefined
    */
   getLog(sessionId: string, since = 0): LogEntry[] | undefined {
-    const record = this.sessions.get(sessionId);
+    const record = this.sessions.get(sessionId) ?? this.looseFind(sessionId);
     if (record === undefined) return undefined;
     return record.log.filter(entry => entry.seq > since);
   }
@@ -632,6 +642,11 @@ export class SessionSupervisor {
    * @returns 登记项
    * @throws SupervisorError('not_found') 无匹配
    */
+  /** 宽松查找：viewId 精确 → sessionId 精确 → 前缀/别名（多视图取最新） */
+  private looseFind(id: string): SupervisedSession | undefined {
+    try { return this.find(id); } catch { return undefined; }
+  }
+
   private find(target: string): SupervisedSession {
     const direct = this.sessions.get(target);
     if (direct !== undefined) return direct;
@@ -639,14 +654,16 @@ export class SessionSupervisor {
       record.sessionId.startsWith(target) || record.hostAlias === target);
     const unique = matches.length === 1 ? matches[0] : undefined;
     if (unique !== undefined) return unique;
-    // 多条命中时优先活跃的（连接中或已连接）
+    // 多条命中时优先活跃的（连接中或已连接）；多视图同 sessionId 时取最新视图
     const active = matches.filter(record => record.connecting || record.session !== undefined);
-    const uniqueActive = active.length === 1 ? active[0] : undefined;
-    if (uniqueActive !== undefined) return uniqueActive;
+    if (active.length === 1) return active[0];
+    if (matches.length > 0 && new Set(matches.map(r => r.sessionId)).size === 1) {
+      return matches[matches.length - 1]!;
+    }
     throw new SupervisorError(
       'not_found',
       matches.length > 1
-        ? `'${target}' 命中 ${matches.length} 个会话，请用完整会话 id 指定：${matches.map(record => record.sessionId).join('、')}`
+        ? `'${target}' 命中 ${matches.length} 个会话，请用完整会话 id 指定：${matches.map(record => record.viewId).join('、')}`
         : `没有匹配 '${target}' 的会话（用 status 查看现有会话）`,
     );
   }
@@ -676,6 +693,7 @@ export class SessionSupervisor {
     const session = record.session;
     return {
       sessionId: record.sessionId,
+      viewId: record.viewId,
       hostAlias: record.hostAlias,
       remoteCwd: record.remoteCwd,
       transportType: record.transportType,

@@ -94,8 +94,12 @@ export function SshSessionPanel(props: SshSessionPanelProps): ReactNode {
 
   // 连接已受理（表单回调）：接管选中态与窗口导航意图
   const onConnected = (session: PanelSession, mode: 'current' | 'new' | 'window'): void => {
-    pendingNav.current = { sessionId: session.sessionId, mode };
-    setSelectedId(session.sessionId);
+    pendingNav.current = {
+      sessionId: session.sessionId,
+      ...(session.viewId !== undefined ? { viewId: session.viewId } : {}),
+      mode,
+    };
+    setSelectedId(session.viewId ?? session.sessionId);
   };
 
   /**
@@ -300,14 +304,16 @@ export function renderSessionRow(
   const stateLabel = t((STATE_LABEL_KEYS[stateTag] ?? 'stateIdle') as RemoteExplorerLocaleKey);
   const stateColor = STATE_COLORS[stateTag] ?? '#9ca3af';
   const missingKeys = session.missingKeyEnvs ?? [];
+  // 行身份 = 视图 id（同会话多视图时每行独立）；旧快照无 viewId 退回会话 id
+  const rowId = session.viewId ?? session.sessionId;
   return (
     <div
-      key={session.sessionId}
-      onClick={() => actions.onSelect(session.sessionId)}
+      key={rowId}
+      onClick={() => actions.onSelect(rowId)}
       style={{
         display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px',
         border: '1px solid rgba(127,127,127,0.3)', borderRadius: 6, cursor: 'pointer',
-        background: session.sessionId === selectedId ? 'rgba(127,127,127,0.12)' : 'transparent',
+        background: rowId === selectedId ? 'rgba(127,127,127,0.12)' : 'transparent',
         flexWrap: 'wrap',
       }}
     >
@@ -347,6 +353,7 @@ export function renderSessionRow(
                     event.stopPropagation();
                     openRemoteWindow({
                       sessionId: session.sessionId,
+                      viewKey: rowId,
                       url: session.url ?? '',
                       hostAlias: session.hostAlias,
                     });
@@ -393,7 +400,7 @@ export function renderSessionRow(
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              actions.onRestart(session.sessionId);
+              actions.onRestart(rowId);
             }}
             style={{
                   background: 'transparent', color: 'inherit', fontSize: 12, fontWeight: 600,
@@ -412,7 +419,7 @@ export function renderSessionRow(
             type="button"
             onClick={(event) => {
               event.stopPropagation();
-              actions.onDisconnect(session.sessionId);
+              actions.onDisconnect(rowId);
             }}
             style={{
               background: 'transparent', color: 'inherit', fontSize: 12,

@@ -40,7 +40,7 @@ export interface UseSessionPollingResult {
   /** 选中会话的增量日志条目 */
   log: LogEntry[];
   /** 待交接导航引用（连接发起时写入，就绪/失败后清除） */
-  pendingNav: React.MutableRefObject<{ sessionId: string; mode: 'current' | 'new' | 'window' } | null>;
+  pendingNav: React.MutableRefObject<{ sessionId: string; viewId?: string; mode: 'current' | 'new' | 'window' } | null>;
   /** 同标签自动导航倒计时；null = 无待跳转 */
   countdown: { url: string; seconds: number } | null;
   /** 设置倒计时状态 */
@@ -64,7 +64,7 @@ export function useSessionPolling(options: UseSessionPollingOptions): UseSession
   const lastSeq = React.useRef(0);
 
   // ---- 窗口形态交接 ----
-  const pendingNav = React.useRef<{ sessionId: string; mode: 'current' | 'new' | 'window' } | null>(null);
+  const pendingNav = React.useRef<{ sessionId: string; viewId?: string; mode: 'current' | 'new' | 'window' } | null>(null);
   const [countdown, setCountdown] = React.useState<{ url: string; seconds: number } | null>(null);
 
   // 用 ref 持有最新回调，避免 effect 依赖变化导致轮询重启
@@ -85,13 +85,18 @@ export function useSessionPolling(options: UseSessionPollingOptions): UseSession
         // 交接：会话就绪后通知面板，由面板按形态分流（桌面端浮层 / 浏览器端倒计时）
         const pending = pendingNav.current;
         if (pending !== null) {
-          const ready = next.find(item => item.sessionId === pending.sessionId
+          // 同会话多视图：视图 id 精确匹配，旧调用方（无 viewId）退回按会话 id
+          const sameView = (item: PanelSession): boolean =>
+            pending.viewId !== undefined
+              ? item.viewId === pending.viewId
+              : item.sessionId === pending.sessionId;
+          const ready = next.find(item => sameView(item)
             && !item.connecting && item.url !== undefined);
           if (ready?.url !== undefined) {
             // 先通知面板再清除引用，让回调能读到 pendingNav.current.mode
             onSessionReadyRef.current?.(ready);
             pendingNav.current = null;
-          } else if (next.some(item => item.sessionId === pending.sessionId
+          } else if (next.some(item => sameView(item)
             && item.connectError !== undefined)) {
             onSessionErrorRef.current?.(pending.sessionId);
             pendingNav.current = null;

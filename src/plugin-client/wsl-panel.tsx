@@ -162,7 +162,11 @@ export function WslSessionPanel(props: WslSessionPanelProps): ReactNode {
         managerUrl: DESKTOP ? OVERLAY_INTENT_ORIGIN : window.location.origin,
       });
       logger.info('postConnect 返回', { sessionId: session.sessionId, connecting: session.connecting, url: session.url });
-      pendingNav.current = { sessionId: session.sessionId, mode };
+      pendingNav.current = {
+        sessionId: session.sessionId,
+        ...(session.viewId !== undefined ? { viewId: session.viewId } : {}),
+        mode,
+      };
       try {
         localStorage.setItem(`${LAST_CWD_KEY_PREFIX}${distroName.trim()}`, cwd.trim());
         // dsh 版本按传输形态（WSL）记忆，下次连接时恢复上次选择
